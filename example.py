@@ -75,7 +75,9 @@ def main():
     print("\nGenerating new trajectories...")
     generator = TrajectoryGenerator(model, preprocessor)
     new_trajectories = generator.generate(n_samples=5)
-    
+    print(new_trajectories)
+
+
     # Plot
     print("Plotting results...")
     fig = plot_multiple_trajectories(
