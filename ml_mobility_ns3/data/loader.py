@@ -21,6 +21,13 @@ class NetMob25Loader:
         path = self.data_dir / "individuals.csv"
         logger.info(f"Loading individuals from {path}")
         self.individuals_df = pd.read_csv(path)
+        
+        # Drop temporary columns if they exist (from fake data generation)
+        temp_cols = ['home_lat', 'home_lon']
+        existing_temp_cols = [col for col in temp_cols if col in self.individuals_df.columns]
+        if existing_temp_cols:
+            self.individuals_df = self.individuals_df.drop(columns=existing_temp_cols)
+        
         return self.individuals_df
     
     def load_trips(self) -> pd.DataFrame:
@@ -33,6 +40,13 @@ class NetMob25Loader:
         for col in time_cols:
             if col in self.trips_df.columns:
                 self.trips_df[col] = pd.to_datetime(self.trips_df[col], errors='coerce')
+        
+        # Drop temporary columns if they exist (from fake data generation)
+        temp_cols = ['origin_lat', 'origin_lon', 'dest_lat', 'dest_lon']
+        existing_temp_cols = [col for col in temp_cols if col in self.trips_df.columns]
+        if existing_temp_cols:
+            self.trips_df = self.trips_df.drop(columns=existing_temp_cols)
+        
         return self.trips_df
     
     def load_gps_trace(self, user_id: str) -> pd.DataFrame:

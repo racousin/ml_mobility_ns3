@@ -15,7 +15,22 @@ poetry install
 poetry shell
 ```
 
-## Quick Start
+## Quick Start with Fake Data
+
+Since the full NetMob25 dataset requires registration, we provide a script to generate realistic fake data:
+
+```bash
+# Generate fake dataset
+python generate_fake_data.py
+
+# Test with fake data
+python test_fake_data.py
+
+# Train model on fake data
+python train.py --data-dir data/fake_netmob25 --epochs 20 --n-samples 500
+```
+
+## Using Real NetMob25 Data
 
 ```python
 from pathlib import Path
@@ -78,6 +93,15 @@ ml_mobility_ns3/
 - Training with GPU support
 - Trajectory generation and interpolation
 - Visualization utilities
+
+## Fake Data Generation
+
+The `generate_fake_data.py` script creates a realistic dataset mimicking NetMob25:
+- 10 users with demographic profiles
+- 1000 trips with realistic patterns (commutes, shopping, leisure)
+- GPS traces for each trip
+- Paris region coordinates
+- Realistic transport modes and speeds
 
 ## Usage Examples
 

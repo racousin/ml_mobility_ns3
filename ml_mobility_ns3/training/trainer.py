@@ -1,100 +1,160 @@
-#!/usr/bin/env python
-"""Simple training script for trajectory VAE."""
-
-import argparse
-import logging
-from pathlib import Path
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
+from pathlib import Path
+from typing import Optional, Dict
+from tqdm import tqdm
+import logging
 
-from ml_mobility_ns3 import (
-    NetMob25Loader,
-    TrajectoryPreprocessor,
-    TrajectoryVAE,
-    VAETrainer,
-)
+from ..models.vae import TrajectoryVAE, vae_loss
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train Trajectory VAE")
-    parser.add_argument("--data-dir", type=Path, required=True, help="Path to NetMob25 data")
-    parser.add_argument("--output-dir", type=Path, default=Path("output"), help="Output directory")
-    parser.add_argument("--n-samples", type=int, default=1000, help="Number of trajectories to sample")
-    parser.add_argument("--val-split", type=float, default=0.2, help="Validation split ratio")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs")
-    parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--beta", type=float, default=1.0, help="Beta parameter for VAE")
-    parser.add_argument("--latent-dim", type=int, default=32, help="Latent dimension")
-    parser.add_argument("--hidden-dim", type=int, default=128, help="Hidden dimension")
-    parser.add_argument("--seq-length", type=int, default=50, help="Sequence length")
-    parser.add_argument("--device", type=str, default=None, help="Device (cuda/cpu)")
+class VAETrainer:
+    """Simple trainer for Trajectory VAE."""
     
-    args = parser.parse_args()
+    def __init__(
+        self,
+        model: TrajectoryVAE,
+        device: Optional[str] = None,
+        learning_rate: float = 1e-3,
+        beta: float = 1.0,
+    ):
+        self.model = model
+        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.to(self.device)
+        self.beta = beta
+        
+        self.optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        self.history = {'train_loss': [], 'val_loss': []}
+        
+    def train_epoch(self, dataloader: DataLoader) -> Dict[str, float]:
+        """Train for one epoch."""
+        self.model.train()
+        total_loss = 0
+        total_recon = 0
+        total_kl = 0
+        
+        for batch in tqdm(dataloader, desc="Training"):
+            x = batch[0].to(self.device)
+            
+            # Forward pass
+            recon, mu, logvar = self.model(x)
+            loss, metrics = vae_loss(recon, x, mu, logvar, self.beta)
+            
+            # Backward pass
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            
+            total_loss += metrics['loss']
+            total_recon += metrics['recon_loss']
+            total_kl += metrics['kl_loss']
+            
+        n_batches = len(dataloader)
+        return {
+            'loss': total_loss / n_batches,
+            'recon_loss': total_recon / n_batches,
+            'kl_loss': total_kl / n_batches
+        }
     
-    # Create output directory
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    def evaluate(self, dataloader: DataLoader) -> Dict[str, float]:
+        """Evaluate on validation set."""
+        self.model.eval()
+        total_loss = 0
+        total_recon = 0
+        total_kl = 0
+        
+        with torch.no_grad():
+            for batch in dataloader:
+                x = batch[0].to(self.device)
+                recon, mu, logvar = self.model(x)
+                loss, metrics = vae_loss(recon, x, mu, logvar, self.beta)
+                
+                total_loss += metrics['loss']
+                total_recon += metrics['recon_loss']
+                total_kl += metrics['kl_loss']
+                
+        n_batches = len(dataloader)
+        return {
+            'loss': total_loss / n_batches,
+            'recon_loss': total_recon / n_batches,
+            'kl_loss': total_kl / n_batches
+        }
     
-    # Load data
-    logger.info("Loading data...")
-    loader = NetMob25Loader(args.data_dir)
-    trajectories = loader.sample_trajectories(n_samples=args.n_samples, min_points=10)
-    logger.info(f"Loaded {len(trajectories)} trajectories")
+    def fit(
+        self,
+        train_data: np.ndarray,
+        val_data: Optional[np.ndarray] = None,
+        epochs: int = 50,
+        batch_size: int = 32,
+        save_path: Optional[Path] = None,
+    ):
+        """Train the model."""
+        # Create dataloaders
+        train_tensor = torch.FloatTensor(train_data)
+        train_dataset = TensorDataset(train_tensor)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        
+        val_loader = None
+        if val_data is not None:
+            val_tensor = torch.FloatTensor(val_data)
+            val_dataset = TensorDataset(val_tensor)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size)
+        
+        # Training loop
+        best_val_loss = float('inf')
+        
+        for epoch in range(epochs):
+            # Train
+            train_metrics = self.train_epoch(train_loader)
+            self.history['train_loss'].append(train_metrics['loss'])
+            
+            # Validate
+            if val_loader:
+                val_metrics = self.evaluate(val_loader)
+                self.history['val_loss'].append(val_metrics['loss'])
+                
+                logger.info(
+                    f"Epoch {epoch+1}/{epochs} - "
+                    f"Train Loss: {train_metrics['loss']:.4f} "
+                    f"(Recon: {train_metrics['recon_loss']:.4f}, KL: {train_metrics['kl_loss']:.4f}) - "
+                    f"Val Loss: {val_metrics['loss']:.4f}"
+                )
+                
+                # Save best model
+                if save_path and val_metrics['loss'] < best_val_loss:
+                    best_val_loss = val_metrics['loss']
+                    self.save_checkpoint(save_path)
+            else:
+                logger.info(
+                    f"Epoch {epoch+1}/{epochs} - "
+                    f"Train Loss: {train_metrics['loss']:.4f} "
+                    f"(Recon: {train_metrics['recon_loss']:.4f}, KL: {train_metrics['kl_loss']:.4f})"
+                )
+                
+                if save_path:
+                    self.save_checkpoint(save_path)
     
-    # Split data
-    n_val = int(len(trajectories) * args.val_split)
-    train_trajectories = trajectories[:-n_val]
-    val_trajectories = trajectories[-n_val:]
-    logger.info(f"Train: {len(train_trajectories)}, Val: {len(val_trajectories)}")
+    def save_checkpoint(self, path: Path):
+        """Save model checkpoint."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'history': self.history,
+            'beta': self.beta,
+        }, path)
+        logger.info(f"Saved checkpoint to {path}")
     
-    # Preprocess
-    logger.info("Preprocessing data...")
-    preprocessor = TrajectoryPreprocessor(sequence_length=args.seq_length)
-    preprocessor.fit(train_trajectories)
-    
-    train_data = preprocessor.transform(train_trajectories)
-    val_data = preprocessor.transform(val_trajectories)
-    
-    # Save preprocessor
-    import pickle
-    with open(args.output_dir / "preprocessor.pkl", "wb") as f:
-        pickle.dump(preprocessor, f)
-    
-    # Create model
-    logger.info("Creating model...")
-    model = TrajectoryVAE(
-        input_dim=4,
-        sequence_length=args.seq_length,
-        hidden_dim=args.hidden_dim,
-        latent_dim=args.latent_dim,
-    )
-    
-    # Train
-    logger.info("Training...")
-    trainer = VAETrainer(
-        model,
-        device=args.device,
-        learning_rate=args.lr,
-        beta=args.beta,
-    )
-    
-    trainer.fit(
-        train_data,
-        val_data,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        save_path=args.output_dir / "best_model.pt",
-    )
-    
-    # Save training history
-    import json
-    with open(args.output_dir / "history.json", "w") as f:
-        json.dump(trainer.history, f)
-    
-    logger.info(f"Training complete! Results saved to {args.output_dir}")
-
-
-if __name__ == "__main__":
-    main()
+    def load_checkpoint(self, path: Path):
+        """Load model checkpoint."""
+        checkpoint = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.history = checkpoint.get('history', self.history)
+        self.beta = checkpoint.get('beta', self.beta)
