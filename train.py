@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import TensorDataset, DataLoader, random_split
+import pickle
 
 # Make sure the project root is in the python path
 import sys
@@ -47,15 +48,20 @@ def main():
     logger.info(f"Loading preprocessed data from {args.data_path}...")
     try:
         data = np.load(args.data_path)
-    except FileNotFoundError:
-        logger.error(f"Data file not found at {args.data_path}. Please run preprocessing first.")
+        # Metadata is in a separate .pkl file, construct its path
+        metadata_path = args.data_path.parent / "metadata.pkl"
+        logger.info(f"Loading metadata from {metadata_path}...")
+        with open(metadata_path, 'rb') as f:
+            metadata = pickle.load(f)
+
+    except FileNotFoundError as e:
+        logger.error(f"A data file was not found. Please check paths. Error: {e}")
         return
 
     trajectories = torch.from_numpy(data['trajectories']).float()
     masks = torch.from_numpy(data['masks']).bool()
     transport_modes = torch.from_numpy(data['transport_modes']).long()
     trip_lengths = torch.from_numpy(data['trip_lengths']).long()
-    metadata = data['metadata'].item()
 
     logger.info(f"Loaded {len(trajectories)} trajectories.")
     logger.info(f"Max sequence length: {trajectories.shape[1]}")

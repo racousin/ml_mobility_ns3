@@ -1,5 +1,5 @@
 python ./train.py \
-    --data-path ../preprocessing/vae_dataset.npz \
+    --data-path ./preprocessing/vae_dataset.npz \
     --results-dir results/test_run \
     --epochs 3 \
     --batch-size 32 \
@@ -7,14 +7,14 @@ python ./train.py \
 
 python ./generate.py \
     --model-path results/test_run/best_model.pt \
-    --data-path ../preprocessing/vae_dataset.npz \
+    --data-path ./preprocessing/vae_dataset.npz \
     --output-path results/test_run/generated_trajectory.npy \
     --mode "car" \
     --length 250
 
 
 python ./train.py \
-    --data-path ../preprocessing/vae_dataset.npz \
+    --data-path ./preprocessing/vae_dataset.npz \
     --results-dir results/efficient_run \
     --epochs 150 \
     --batch-size 128 \
@@ -27,7 +27,7 @@ python ./train.py \
 
 python ./generate.py \
     --model-path results/efficient_run/best_model.pt \
-    --data-path ../preprocessing/vae_dataset.npz \
+    --data-path ./preprocessing/vae_dataset.npz \
     --output-path results/efficient_run/generated_walks.npy \
     --mode "walk" \
     --length 150 \
