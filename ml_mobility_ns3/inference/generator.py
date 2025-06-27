@@ -117,6 +117,6 @@ class TrajectoryGenerator:
         
         # Add timestamp (relative to start)
         base_time = pd.Timestamp.now()
-        df['UTC_TIMESTAMP'] = base_time + pd.to_timedelta(df['TIME_MINUTES'], unit='min')
+        df['UTC DATETIME'] = base_time + pd.to_timedelta(df['TIME_MINUTES'], unit='min')
         
         return df

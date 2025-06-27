@@ -17,7 +17,7 @@ class TrajectoryPreprocessor:
         # Extract features: lat, lon, time_diff, speed
         features = []
         
-        df = df.sort_values('UTC_TIMESTAMP').reset_index(drop=True)
+        df = df.sort_values('UTC DATETIME').reset_index(drop=True)
         
         for i in range(len(df)):
             row = df.iloc[i]
@@ -30,7 +30,7 @@ class TrajectoryPreprocessor:
             if i == 0:
                 feat.append(0.0)
             else:
-                time_diff = (df.iloc[i]['UTC_TIMESTAMP'] - df.iloc[0]['UTC_TIMESTAMP']).total_seconds() / 60
+                time_diff = (df.iloc[i]['UTC DATETIME'] - df.iloc[0]['UTC DATETIME']).total_seconds() / 60
                 feat.append(time_diff)
             
             # Add speed

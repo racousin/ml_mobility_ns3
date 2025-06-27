@@ -263,8 +263,8 @@ def generate_gps_trajectory(
     timestamps = start_time + pd.to_timedelta(np.cumsum(time_deltas), unit='s')
     
     gps_df = pd.DataFrame({
-        'UTC_TIMESTAMP': timestamps,
-        'LOCAL_TIMESTAMP': timestamps,
+        'UTC DATETIME': timestamps,
+        'LOCAL DATETIME': timestamps,
         'LATITUDE': lats,
         'LONGITUDE': lons,
         'VALID': 'SPS',
@@ -279,7 +279,7 @@ def main():
     # Create output directory
     output_dir = Path("data/fake_netmob25")
     output_dir.mkdir(parents=True, exist_ok=True)
-    gps_dir = output_dir / "gps"
+    gps_dir = output_dir / "gps_dataset"
     gps_dir.mkdir(exist_ok=True)
     
     print("Generating fake NetMob25 dataset...")
@@ -287,13 +287,13 @@ def main():
     # Generate individuals
     print("Creating individuals...")
     individuals_df = generate_individuals(n_users=10)
-    individuals_df.to_csv(output_dir / "individuals.csv", index=False)
+    individuals_df.to_csv(output_dir / "individuals_dataset.csv", index=False)
     print(f"Created {len(individuals_df)} individuals")
     
     # Generate trips
     print("Creating trips...")
     trips_df = generate_trips(individuals_df, n_trips=1000)
-    trips_df.to_csv(output_dir / "trips.csv", index=False)
+    trips_df.to_csv(output_dir / "trips_dataset.csv", index=False)
     print(f"Created {len(trips_df)} trips")
     
     # Generate GPS traces for each user
@@ -320,7 +320,7 @@ def main():
         
         if gps_traces:
             user_gps = pd.concat(gps_traces, ignore_index=True)
-            user_gps = user_gps.sort_values('UTC_TIMESTAMP')
+            user_gps = user_gps.sort_values('UTC DATETIME')
             user_gps.to_csv(gps_dir / f"{user_id}.csv", index=False)
             print(f"Created GPS trace for user {user_id}: {len(user_gps)} points")
     

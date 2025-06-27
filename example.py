@@ -27,7 +27,7 @@ def create_dummy_trajectories(n_trajectories=100, n_points=50):
         speed = np.abs(np.random.randn(n_points) * 5 + 10)
         
         df = pd.DataFrame({
-            'UTC_TIMESTAMP': pd.date_range('2023-01-01', periods=n_points, freq='1min'),
+            'UTC DATETIME': pd.date_range('2023-01-01', periods=n_points, freq='1min'),
             'LATITUDE': lat,
             'LONGITUDE': lon,
             'SPEED': speed,

@@ -20,7 +20,7 @@ def test_preprocess_trajectory():
     
     # Create dummy trajectory
     dummy_traj = pd.DataFrame({
-        'UTC_TIMESTAMP': pd.date_range('2023-01-01', periods=10, freq='1min'),
+        'UTC DATETIME': pd.date_range('2023-01-01', periods=10, freq='1min'),
         'LATITUDE': np.linspace(48.8, 48.9, 10),
         'LONGITUDE': np.linspace(2.3, 2.4, 10),
         'SPEED': np.random.rand(10) * 10

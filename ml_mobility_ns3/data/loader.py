@@ -18,7 +18,7 @@ class NetMob25Loader:
         
     def load_individuals(self) -> pd.DataFrame:
         """Load individuals dataset."""
-        path = self.data_dir / "individuals.csv"
+        path = self.data_dir / "individuals_dataset.csv"
         logger.info(f"Loading individuals from {path}")
         self.individuals_df = pd.read_csv(path)
         
@@ -32,7 +32,7 @@ class NetMob25Loader:
     
     def load_trips(self) -> pd.DataFrame:
         """Load trips dataset."""
-        path = self.data_dir / "trips.csv"
+        path = self.data_dir / "trips_dataset.csv"
         logger.info(f"Loading trips from {path}")
         self.trips_df = pd.read_csv(path)
         # Convert time columns to datetime
@@ -51,13 +51,13 @@ class NetMob25Loader:
     
     def load_gps_trace(self, user_id: str) -> pd.DataFrame:
         """Load GPS trace for a specific user."""
-        path = self.data_dir / "gps" / f"{user_id}.csv"
+        path = self.data_dir / "gps_dataset" / f"{user_id}.csv"
         if not path.exists():
             logger.warning(f"GPS file not found for user {user_id}")
             return pd.DataFrame()
         
         df = pd.read_csv(path)
-        df['UTC_TIMESTAMP'] = pd.to_datetime(df['UTC_TIMESTAMP'])
+        df['UTC DATETIME'] = pd.to_datetime(df['UTC DATETIME'])
         return df
     
     def get_user_trips(self, user_id: str) -> pd.DataFrame:
@@ -70,19 +70,23 @@ class NetMob25Loader:
         """Get GPS points for a specific trip."""
         trips = self.get_user_trips(user_id)
         trip = trips[trips['KEY'] == trip_key]
-        
+
         if trip.empty:
             return pd.DataFrame()
         
         gps = self.load_gps_trace(user_id)
+
         if gps.empty:
             return pd.DataFrame()
         
+        return gps
+
         # Filter GPS points by trip time window
         start_time = trip.iloc[0]['Time_O']
         end_time = trip.iloc[0]['Time_D']
-        
-        mask = (gps['UTC_TIMESTAMP'] >= start_time) & (gps['UTC_TIMESTAMP'] <= end_time)
+
+        mask = (gps['UTC DATETIME'] >= start_time) & (gps['UTC DATETIME'] <= end_time)
+
         return gps[mask]
     
     def sample_trajectories(self, n_samples: int = 100, min_points: int = 10) -> List[pd.DataFrame]:
