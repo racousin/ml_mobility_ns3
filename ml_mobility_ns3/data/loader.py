@@ -21,12 +21,7 @@ class NetMob25Loader:
         path = self.data_dir / "individuals_dataset.csv"
         logger.info(f"Loading individuals from {path}")
         self.individuals_df = pd.read_csv(path)
-        
-        # Drop temporary columns if they exist (from fake data generation)
-        temp_cols = ['home_lat', 'home_lon']
-        existing_temp_cols = [col for col in temp_cols if col in self.individuals_df.columns]
-        if existing_temp_cols:
-            self.individuals_df = self.individuals_df.drop(columns=existing_temp_cols)
+        self.individuals_df = self.individuals_df[self.individuals_df['GPS_RECORD'] == 1]
         
         return self.individuals_df
     
@@ -35,17 +30,7 @@ class NetMob25Loader:
         path = self.data_dir / "trips_dataset.csv"
         logger.info(f"Loading trips from {path}")
         self.trips_df = pd.read_csv(path)
-        # Convert time columns to datetime
-        time_cols = ['Date_O', 'Time_O', 'Date_D', 'Time_D']
-        for col in time_cols:
-            if col in self.trips_df.columns:
-                self.trips_df[col] = pd.to_datetime(self.trips_df[col], errors='coerce')
-        
-        # Drop temporary columns if they exist (from fake data generation)
-        temp_cols = ['origin_lat', 'origin_lon', 'dest_lat', 'dest_lon']
-        existing_temp_cols = [col for col in temp_cols if col in self.trips_df.columns]
-        if existing_temp_cols:
-            self.trips_df = self.trips_df.drop(columns=existing_temp_cols)
+
         
         return self.trips_df
     
@@ -81,13 +66,6 @@ class NetMob25Loader:
         
         return gps
 
-        # Filter GPS points by trip time window
-        start_time = trip.iloc[0]['Time_O']
-        end_time = trip.iloc[0]['Time_D']
-
-        mask = (gps['UTC DATETIME'] >= start_time) & (gps['UTC DATETIME'] <= end_time)
-
-        return gps[mask]
     
     def sample_trajectories(self, n_samples: int = 100, min_points: int = 10) -> List[pd.DataFrame]:
         """Sample random trajectories from the dataset."""

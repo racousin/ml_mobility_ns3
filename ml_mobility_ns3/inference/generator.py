@@ -4,7 +4,7 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Optional, Union
 
-from ..models.vae import TrajectoryVAE
+from ..models.vae import ConditionalTrajectoryVAE
 from ..data.preprocessor import TrajectoryPreprocessor
 
 
@@ -13,7 +13,7 @@ class TrajectoryGenerator:
     
     def __init__(
         self,
-        model: TrajectoryVAE,
+        model: ConditionalTrajectoryVAE,
         preprocessor: TrajectoryPreprocessor,
         device: Optional[str] = None,
     ):
@@ -33,7 +33,7 @@ class TrajectoryGenerator:
     ):
         """Load generator from checkpoint."""
         # Create model
-        model = TrajectoryVAE(**model_kwargs)
+        model = ConditionalTrajectoryVAE(**model_kwargs)
         
         # Load checkpoint
         device = device or ('cuda' if torch.cuda.is_available() else 'cpu')

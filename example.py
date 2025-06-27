@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from ml_mobility_ns3 import (
     NetMob25Loader,
     TrajectoryPreprocessor,
-    TrajectoryVAE,
+    ConditionalTrajectoryVAE,
     VAETrainer,
     TrajectoryGenerator,
 )
@@ -55,7 +55,7 @@ def main():
     print(f"Train shape: {train_data.shape}, Val shape: {val_data.shape}")
     
     print("Creating model...")
-    model = TrajectoryVAE(
+    model = ConditionalTrajectoryVAE(
         input_dim=4,
         sequence_length=50,
         hidden_dim=64,

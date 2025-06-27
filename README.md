@@ -37,7 +37,7 @@ from pathlib import Path
 from ml_mobility_ns3 import (
     NetMob25Loader,
     TrajectoryPreprocessor,
-    TrajectoryVAE,
+    ConditionalTrajectoryVAE,
     VAETrainer,
     TrajectoryGenerator
 )
@@ -53,7 +53,7 @@ train_data = preprocessor.transform(trajectories[:800])
 val_data = preprocessor.transform(trajectories[800:])
 
 # Create and train model
-model = TrajectoryVAE(
+model = ConditionalTrajectoryVAE(
     input_dim=4,
     sequence_length=50,
     hidden_dim=128,
