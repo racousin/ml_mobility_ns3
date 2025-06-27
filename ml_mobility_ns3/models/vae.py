@@ -25,6 +25,8 @@ class ConditionalTrajectoryVAE(nn.Module):
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
         self.condition_dim = condition_dim
+        self.num_transport_modes = num_transport_modes
+        self.num_layers = num_layers
         
         # Condition embeddings
         self.transport_mode_embedding = nn.Embedding(num_transport_modes, condition_dim)
