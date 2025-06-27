@@ -34,14 +34,31 @@ def main():
     parser.add_argument("--num-layers", type=int, default=2, help="Number of layers in LSTMs")
     parser.add_argument("--condition-dim", type=int, default=32, help="Dimension for condition embeddings")
     parser.add_argument("--device", type=str, default=None, help="Device to use (e.g., 'cuda', 'cpu')")
+    parser.add_argument("--gpu-id", type=int, default=0, help="GPU ID to use if running on CUDA")
     
     args = parser.parse_args()
     
     # Setup device
     if args.device:
-        device = args.device
+        device_name = args.device
     else:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    if device_name == 'cuda':
+        if not torch.cuda.is_available():
+            logger.warning("CUDA is not available, falling back to CPU.")
+            device = 'cpu'
+        elif args.gpu_id >= torch.cuda.device_count():
+            logger.warning(
+                f"GPU ID {args.gpu_id} is invalid. "
+                f"Available GPUs: {torch.cuda.device_count()}. Falling back to GPU 0."
+            )
+            device = 'cuda:0'
+        else:
+            device = f'cuda:{args.gpu_id}'
+    else:
+        device = 'cpu'
+        
     logger.info(f"Using device: {device}")
     
     # Load data

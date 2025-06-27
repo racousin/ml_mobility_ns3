@@ -4,7 +4,9 @@ python ./train.py \
     --epochs 3 \
     --batch-size 32 \
     --beta 0.001
-
+    --device cuda \
+    --gpu-id 1
+    
 python ./generate.py \
     --model-path results/test_run/best_model.pt \
     --data-path ./preprocessing/vae_dataset.npz \
@@ -23,7 +25,8 @@ python ./train.py \
     --hidden-dim 512 \
     --latent-dim 64 \
     --num-layers 2 \
-    --device cuda
+    --device cuda \
+    --gpu-id 1
 
 python ./generate.py \
     --model-path results/efficient_run/best_model.pt \
@@ -32,4 +35,5 @@ python ./generate.py \
     --mode "walk" \
     --length 150 \
     --n-samples 5 \
-    --device cuda
+    --device cuda \
+    --gpu-id 1
