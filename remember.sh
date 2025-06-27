@@ -3,17 +3,18 @@ python ./train.py \
     --results-dir results/test_run \
     --epochs 3 \
     --batch-size 32 \
-    --beta 0.001
+    --beta 0.001 \
     --device cuda \
     --gpu-id 1
-    
+
 python ./generate.py \
     --model-path results/test_run/best_model.pt \
     --data-path ./preprocessing/vae_dataset.npz \
     --output-path results/test_run/generated_trajectory.npy \
-    --mode "car" \
-    --length 250
-
+    --mode "PRIV_CAR_DRIVER" \
+    --length 250 \
+    --device cuda \
+    --gpu-id 2
 
 python ./train.py \
     --data-path ./preprocessing/vae_dataset.npz \
@@ -32,7 +33,7 @@ python ./generate.py \
     --model-path results/efficient_run/best_model.pt \
     --data-path ./preprocessing/vae_dataset.npz \
     --output-path results/efficient_run/generated_walks.npy \
-    --mode "walk" \
+    --mode "WALKING" \
     --length 150 \
     --n-samples 5 \
     --device cuda \
