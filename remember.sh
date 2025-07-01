@@ -38,3 +38,12 @@ python ./generate.py \
     --n-samples 5 \
     --device cuda \
     --gpu-id 1
+
+
+
+cd cpp
+mkdir build && cd build
+cmake -DCMAKE_PREFIX_PATH=/Users/raphaelcousin/libtorch ..
+cmake --build . --config Release
+./run_trajectory_gen
+

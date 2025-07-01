@@ -6,6 +6,7 @@ results/
 __pycache__/
 *.py[cod]
 *$py.class
+cpp/
 
 # Distribution / packaging
 .Python
