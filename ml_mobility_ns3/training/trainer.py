@@ -39,8 +39,8 @@ class VAETrainer:
         for batch in tqdm(dataloader, desc="Training"):
             x, mask, mode, length = [b.to(self.device) for b in batch]
 
-            # Forward pass
-            recon, mu, logvar = self.model(x, mode, length)
+            # Forward pass - now passing mask to the model
+            recon, mu, logvar = self.model(x, mode, length, mask)
             loss, metrics = masked_vae_loss(recon, x, mu, logvar, mask, self.beta)
 
             # Backward pass
@@ -70,7 +70,8 @@ class VAETrainer:
         for batch in tqdm(dataloader, desc="Evaluating"):
             x, mask, mode, length = [b.to(self.device) for b in batch]
 
-            recon, mu, logvar = self.model(x, mode, length)
+            # Forward pass - now passing mask to the model
+            recon, mu, logvar = self.model(x, mode, length, mask)
             loss, metrics = masked_vae_loss(recon, x, mu, logvar, mask, self.beta)
             
             total_loss += metrics['loss']
@@ -126,7 +127,7 @@ class VAETrainer:
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'config': self.model.get_config(), # Assuming you add a get_config method
+            'config': self.model.get_config(),
         }, path)
         logger.debug(f"Saved checkpoint to {path}")
 

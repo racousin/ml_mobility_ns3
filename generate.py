@@ -15,6 +15,7 @@ import sys
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from ml_mobility_ns3.models.vae import ConditionalTrajectoryVAE
+from ml_mobility_ns3.utils.model_utils import load_model_from_checkpoint
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ def main():
         with open(data_dir / "scalers.pkl", 'rb') as f:
             scalers = pickle.load(f)
         # The order of features in the VAE model (lat, lon, speed)
-        feature_names = metadata.get('feature_names', ['lat', 'lon', 'speed'])
+        feature_names = metadata.get('feature_names', ['latitude', 'longitude', 'speed'])
 
     except FileNotFoundError as e:
         logger.error(f"Could not load metadata or scalers. Please check the path. Error: {e}")
@@ -79,13 +80,7 @@ def main():
         return
 
     logger.info(f"Loading model from {args.model_path}...")
-    checkpoint = torch.load(args.model_path, map_location=device)
-    model_config = checkpoint['config']
-    
-    model = ConditionalTrajectoryVAE(**model_config)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.to(device)
-    model.eval()
+    model, config = load_model_from_checkpoint(args.model_path, device)
 
     # --- Prepare inputs for generation ---
     if args.mode not in transport_modes_map:
@@ -104,31 +99,67 @@ def main():
     # --- Inverse Transform (Un-scale) the Data ---
     logger.info("Un-scaling generated data to real-world values...")
     results = []
+    
+    # Get the trajectory scaler
+    trajectory_scaler = scalers.get('trajectory')
+    if trajectory_scaler is None:
+        logger.error("Trajectory scaler not found in scalers.pkl")
+        return
+    
     for i in range(args.n_samples):
         # Get the valid part of the scaled trajectory
         valid_trajectory_scaled = generated_trajectories_scaled[i, :args.length, :].cpu().numpy()
 
-        # Create an empty array for the un-scaled data
-        unscaled_trajectory = np.zeros_like(valid_trajectory_scaled)
+        # Apply inverse transform
+        unscaled_trajectory = trajectory_scaler.inverse_transform(valid_trajectory_scaled)
         
-        # Apply inverse transform for each feature
-        for feature_idx, feature_name in enumerate(feature_names):
-            if feature_name in scalers:
-                scaler = scalers[feature_name]
-                feature_col_scaled = valid_trajectory_scaled[:, feature_idx:feature_idx+1]
-                feature_col_unscaled = scaler.inverse_transform(feature_col_scaled)
-                unscaled_trajectory[:, feature_idx:feature_idx+1] = feature_col_unscaled
-            else:
-                logger.warning(f"Scaler for feature '{feature_name}' not found. Leaving it as is.")
-                unscaled_trajectory[:, feature_idx:feature_idx+1] = valid_trajectory_scaled[:, feature_idx:feature_idx+1]
-
-        results.append(unscaled_trajectory)
+        # Create a structured array with proper field names
+        trajectory_data = {
+            'latitude': unscaled_trajectory[:, 0],
+            'longitude': unscaled_trajectory[:, 1],
+            'speed': unscaled_trajectory[:, 2],
+            'transport_mode': args.mode,
+            'length': args.length
+        }
+        
+        results.append(trajectory_data)
     
-    # If only one sample, save directly, otherwise save as a list of arrays (allowing for different lengths in future use cases)
-    output_data = results[0] if args.n_samples == 1 else results
+    # Save results
+    if args.n_samples == 1:
+        output_data = results[0]
+    else:
+        output_data = results
 
     np.save(args.output_path, output_data, allow_pickle=True)
     logger.info(f"Successfully generated and saved un-scaled trajectory to {args.output_path}")
+    
+    # Also save some statistics
+    stats_path = args.output_path.with_suffix('.stats.json')
+    stats = {
+        'n_samples': args.n_samples,
+        'transport_mode': args.mode,
+        'requested_length': args.length,
+        'model_path': str(args.model_path),
+        'generation_stats': []
+    }
+    
+    for i, traj_data in enumerate(results):
+        traj_stats = {
+            'sample_id': i,
+            'lat_range': [float(np.min(traj_data['latitude'])), float(np.max(traj_data['latitude']))],
+            'lon_range': [float(np.min(traj_data['longitude'])), float(np.max(traj_data['longitude']))],
+            'speed_stats': {
+                'min': float(np.min(traj_data['speed'])),
+                'max': float(np.max(traj_data['speed'])),
+                'mean': float(np.mean(traj_data['speed'])),
+                'std': float(np.std(traj_data['speed']))
+            }
+        }
+        stats['generation_stats'].append(traj_stats)
+    
+    with open(stats_path, 'w') as f:
+        json.dump(stats, f, indent=2)
+    logger.info(f"Saved generation statistics to {stats_path}")
 
 if __name__ == "__main__":
     main()
