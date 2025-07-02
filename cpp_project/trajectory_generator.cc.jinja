@@ -167,38 +167,35 @@ std::vector<Trajectory> TrajectoryGenerator::generate(const std::string& transpo
     
     int mode_idx = mode_to_idx(transport_mode);
     
-    // Prepare input tensors
+    // Prepare input tensors (these will be reused for each sample)
     auto mode_tensor = torch::tensor({mode_idx}, torch::dtype(torch::kLong)).to(device);
     auto length_tensor = torch::tensor({trip_length}, torch::dtype(torch::kLong)).to(device);
     
-
-    // Generate trajectories
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(mode_tensor);
     inputs.push_back(length_tensor);
-
-    auto output = module.forward(inputs);
     
-    torch::Tensor generated_trajectories;
-    try {
-        auto output = module.forward(inputs);
-        generated_trajectories = output.toTensor();
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Model inference failed: " + std::string(e.what()));
-    }
-    
-    std::cout << "Generated tensor shape: " << generated_trajectories.sizes() << std::endl;
-    
-    // Convert results to Trajectory objects
     std::vector<Trajectory> results;
     results.reserve(n_samples);
     
-    for (int i = 0; i < n_samples; ++i) {
-        // Extract valid part of trajectory (up to trip_length)
-        auto single_trajectory = generated_trajectories[i].slice(0, 0, trip_length);
+    // Generate trajectories one by one (since model only generates 1 at a time)
+    for (int sample = 0; sample < n_samples; ++sample) {
+        torch::Tensor single_trajectory;
+        try {
+            auto output = module.forward(inputs);
+            single_trajectory = output.toTensor();
+        } catch (const std::exception& e) {
+            throw std::runtime_error("Model inference failed: " + std::string(e.what()));
+        }
+        
+        std::cout << "Generated tensor shape for sample " << (sample + 1) 
+                  << ": " << single_trajectory.sizes() << std::endl;
+        
+        // Extract the trajectory (tensor is [1, seq_len, 3], we want [0])
+        auto trajectory_tensor = single_trajectory[0].slice(0, 0, trip_length);
         
         // Inverse transform to real-world coordinates
-        auto points = inverse_transform(single_trajectory);
+        auto points = inverse_transform(trajectory_tensor);
         
         Trajectory traj;
         traj.points = points;

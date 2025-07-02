@@ -22,17 +22,19 @@ int main() {
             std::cout << "\n--- Testing mode: " << mode << " ---" << std::endl;
             
             try {
-                auto trajectories = generator.generate(mode, 50, 1);
+                auto trajectories = generator.generate(mode, 200, 3);  // Generate 3 shorter trajectories for testing
                 
-                if (!trajectories.empty()) {
-                    const auto& traj = trajectories[0];
-                    std::cout << "Generated trajectory with " << traj.points.size() << " points" << std::endl;
-                    std::cout << "Mode: " << traj.mode << ", Length: " << traj.length << std::endl;
+                std::cout << "Generated " << trajectories.size() << " trajectories" << std::endl;
+                
+                for (size_t t = 0; t < trajectories.size(); ++t) {
+                    const auto& traj = trajectories[t];
+                    std::cout << "\n  Trajectory " << (t + 1) << ":" << std::endl;
+                    std::cout << "    Points: " << traj.points.size() << ", Mode: " << traj.mode << ", Length: " << traj.length << std::endl;
                     
-                    // Show first 5 points
-                    std::cout << "First 5 points:" << std::endl;
-                    for (size_t i = 0; i < 5 && i < traj.points.size(); ++i) {
-                        std::cout << "  Point " << i << ": [";
+                    // Show first 3 points for each trajectory
+                    std::cout << "    First 3 points:" << std::endl;
+                    for (size_t i = 0; i < 3 && i < traj.points.size(); ++i) {
+                        std::cout << "      Point " << i << ": [";
                         std::cout << std::fixed << std::setprecision(6);
                         std::cout << "lat=" << traj.points[i][0];
                         std::cout << ", lon=" << traj.points[i][1];
@@ -40,7 +42,7 @@ int main() {
                         std::cout << "]" << std::endl;
                     }
                     
-                    // Show some statistics
+                    // Show statistics for this trajectory
                     if (!traj.points.empty()) {
                         double min_lat = traj.points[0][0], max_lat = traj.points[0][0];
                         double min_lon = traj.points[0][1], max_lon = traj.points[0][1];
@@ -58,19 +60,38 @@ int main() {
                         }
                         avg_speed /= traj.points.size();
                         
-                        std::cout << "Statistics:" << std::endl;
-                        std::cout << "  Latitude range: [" << min_lat << ", " << max_lat << "]" << std::endl;
-                        std::cout << "  Longitude range: [" << min_lon << ", " << max_lon << "]" << std::endl;
-                        std::cout << "  Speed range: [" << min_speed << ", " << max_speed << "]" << std::endl;
-                        std::cout << "  Average speed: " << avg_speed << std::endl;
+                        std::cout << "    Statistics:" << std::endl;
+                        std::cout << "      Lat range: [" << std::fixed << std::setprecision(4) << min_lat << ", " << max_lat << "]" << std::endl;
+                        std::cout << "      Lon range: [" << min_lon << ", " << max_lon << "]" << std::endl;
+                        std::cout << "      Speed range: [" << std::setprecision(2) << min_speed << ", " << max_speed << "] km/h" << std::endl;
+                        std::cout << "      Average speed: " << avg_speed << " km/h" << std::endl;
                     }
                 }
+                
+                // Summary statistics across all trajectories for this mode
+                if (!trajectories.empty()) {
+                    double total_avg_speed = 0.0;
+                    for (const auto& traj : trajectories) {
+                        double traj_avg = 0.0;
+                        for (const auto& point : traj.points) {
+                            traj_avg += point[2];
+                        }
+                        traj_avg /= traj.points.size();
+                        total_avg_speed += traj_avg;
+                    }
+                    total_avg_speed /= trajectories.size();
+                    
+                    std::cout << "\n  Mode " << mode << " Summary:" << std::endl;
+                    std::cout << "    Average speed across all trajectories: " << std::fixed << std::setprecision(2) << total_avg_speed << " km/h" << std::endl;
+                }
+                
             } catch (const std::exception& e) {
                 std::cerr << "Error generating trajectory for mode " << mode << ": " << e.what() << std::endl;
             }
         }
         
         std::cout << "\n=== Generation Complete ===" << std::endl;
+        std::cout << "All transport modes tested successfully!" << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;

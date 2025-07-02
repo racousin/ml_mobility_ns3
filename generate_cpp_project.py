@@ -207,8 +207,17 @@ cd build
 # Configure with CMake
 cmake ..
 
-# Build
-make -j$(nproc)
+# Build with appropriate CPU count detection
+if command -v nproc &> /dev/null; then
+    # Linux
+    make -j$(nproc)
+elif command -v sysctl &> /dev/null; then
+    # macOS
+    make -j$(sysctl -n hw.ncpu)
+else
+    # Fallback to single core
+    make
+fi
 
 echo "Build complete! Executable: ./run_trajectory_gen"
 echo "Run with: ./build/run_trajectory_gen"
