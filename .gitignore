@@ -1,3 +1,5 @@
+libtorch/
+libtorch*
 data/
 preprocessing/
 data.zip

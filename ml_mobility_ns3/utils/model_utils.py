@@ -206,3 +206,29 @@ def compute_reconstruction_error(
         'total_valid_points': total_valid_points,
         'rmse': np.sqrt(mean_recon_error)
     }
+
+def convert_to_torchscript(model, example_inputs: Tuple[torch.Tensor, ...], 
+                          output_path: Path, method: str = 'trace'):
+    """
+    Convert a PyTorch model to TorchScript format.
+    
+    Args:
+        model: The PyTorch model to convert
+        example_inputs: Example inputs for tracing
+        output_path: Path to save the TorchScript model
+        method: 'trace' or 'script'
+    """
+    model.eval()
+    
+    if method == 'trace':
+        with torch.no_grad():
+            traced_model = torch.jit.trace(model, example_inputs)
+    elif method == 'script':
+        traced_model = torch.jit.script(model)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+    
+    traced_model.save(str(output_path))
+    print(f"TorchScript model saved to: {output_path}")
+    
+    return traced_model

@@ -1,400 +1,253 @@
+#!/usr/bin/env python
+"""Generate C++ project from trained VAE model."""
+
+import argparse
 import json
-import torch
-import shutil
 import pickle
+import shutil
 from pathlib import Path
-from jinja2 import Environment, FileSystemLoader
+import torch
+import numpy as np
+import logging
+from jinja2 import Template
 
-# Répertoires
-BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = BASE_DIR / "cpp" / "utils" / "templates"
-CPP_DIR = BASE_DIR / "cpp"
-RESULTS_DIR = BASE_DIR / "results" / "efficient_run"
-PREPROCESSING_DIR = BASE_DIR / "preprocessing"
+# Add project root to path
+import sys
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-# Fichiers de modèle
-MODEL_PATH = BASE_DIR / "traced_vae_model.pt"
-METADATA_PATH = BASE_DIR / "metadata.json"
-SCALERS_PATH = BASE_DIR / "scalers.json"
+from ml_mobility_ns3.models.vae import ConditionalTrajectoryVAE
+from ml_mobility_ns3.utils.model_utils import convert_to_torchscript
+from ml_mobility_ns3.utils.model_utils import load_model_from_checkpoint
 
-# Jinja2 : setup
-env = Environment(loader=FileSystemLoader(TEMPLATES_DIR))
-
-
-def render_template(template_name, output_path, context=None):
-    context = context or {}
-    template = env.get_template(template_name)
-    with open(output_path, 'w') as f:
-        f.write(template.render(context))
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
-def copy_placeholder(filename: str):
-    src = TEMPLATES_DIR / filename
-    dst = CPP_DIR / filename.replace(".placeholder", "")
-    shutil.copyfile(src, dst)
-
-
-def load_model_metadata():
-    """Load model configuration from the saved model."""
-    try:
-        best_model_path = RESULTS_DIR / "best_model.pt"
-        checkpoint = torch.load(best_model_path, map_location='cpu')
+class TorchScriptModel(torch.nn.Module):
+    def __init__(self, vae_model, fixed_n_samples=1):
+        super().__init__()
+        self.vae = vae_model
+        self.fixed_n_samples = fixed_n_samples
         
-        # Handle different save formats
-        if isinstance(checkpoint, dict):
-            if 'model' in checkpoint:
-                model = checkpoint['model']
-            elif 'model_state_dict' in checkpoint:
-                # Need to reconstruct model from config
-                if 'config' in checkpoint:
-                    config = checkpoint['config']
-                    print(f"📋 Model configuration loaded from checkpoint: {config}")
-                    return None, config  # Return config without model object
-                else:
-                    print("❌ Checkpoint contains state_dict but no config")
-                    return None, None
-            else:
-                print("❌ Unknown checkpoint format")
-                return None, None
-        else:
-            # Direct model object
-            model = checkpoint
-        
-        # Get model configuration
-        if model and hasattr(model, 'get_config'):
-            config = model.get_config()
-        elif model:
-            # Fallback: try to infer from model structure
-            config = {
-                'input_dim': getattr(model, 'input_dim', 3),
-                'sequence_length': getattr(model, 'sequence_length', 2000),
-                'hidden_dim': getattr(model, 'hidden_dim', 128),
-                'latent_dim': getattr(model, 'latent_dim', 32),
-                'num_layers': getattr(model, 'num_layers', 2),
-                'num_transport_modes': getattr(model, 'num_transport_modes', 10),
-                'condition_dim': getattr(model, 'condition_dim', 32),
-                'architecture': getattr(model, 'architecture', 'lstm'),
-            }
-        else:
-            return None, None
-        
-        print(f"📋 Model configuration loaded: {config}")
-        return model, config
-        
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
-        return None, None
+    def forward(self, transport_mode: torch.Tensor, trip_length: torch.Tensor):
+        """Generate trajectories - TorchScript compatible version with fixed n_samples."""
+        device = transport_mode.device
+        conditions = self.vae.get_conditions(transport_mode, trip_length)
+        z = torch.randn(self.fixed_n_samples, self.vae.latent_dim, device=device)
+        trajectories = self.vae.decode(z, conditions)
+        return trajectories
 
 
-def create_traced_model():
-    """Create traced model from best_model.pt using actual model configuration."""
-    print("🔄 Creating traced model...")
+def convert_model_to_torchscript(model_path: Path, output_path: Path, device: str = 'cpu'):
+    """Convert the trained VAE model to TorchScript format."""
+    logger.info(f"Loading model from {model_path}")
     
-    # First, let's check what's in the checkpoint
-    best_model_path = RESULTS_DIR / "best_model.pt"
-    checkpoint = torch.load(best_model_path, map_location='cpu')
+    # Load the trained model
+    model, config = load_model_from_checkpoint(model_path, device)
+    model.eval()
     
-    try:
-        # Try to reconstruct the model
-        if isinstance(checkpoint, dict) and 'config' in checkpoint:
-            config = checkpoint['config']
-            
-            # Import and recreate the model
-            from models.vae import ConditionalTrajectoryVAE
-            model = ConditionalTrajectoryVAE(**config)
-            
-            # Load the state dict
-            if 'model_state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['model_state_dict'])
-            elif 'model' in checkpoint and hasattr(checkpoint['model'], 'state_dict'):
-                model.load_state_dict(checkpoint['model'].state_dict())
-            else:
-                print("❌ Could not find model state dict in checkpoint")
-                return False
-                
-        elif hasattr(checkpoint, 'eval'):
-            # Direct model object
-            model = checkpoint
-            config = model.get_config() if hasattr(model, 'get_config') else {}
-        else:
-            print("❌ Could not reconstruct model from checkpoint")
-            print(f"   Checkpoint keys: {list(checkpoint.keys()) if isinstance(checkpoint, dict) else type(checkpoint)}")
-            return False
-        
-        model.eval()
-        
-        # Create dummy inputs based on actual model configuration
-        batch_size = 1
-        seq_len = config.get('sequence_length', 2000)
-        input_dim = config.get('input_dim', 3)
-        num_transport_modes = config.get('num_transport_modes', 10)
-        
-        # Create dummy inputs for VAE forward pass
-        dummy_trajectory = torch.randn(batch_size, seq_len, input_dim)
-        dummy_transport_mode = torch.randint(0, num_transport_modes, (batch_size,))
-        dummy_trip_length = torch.randint(50, seq_len, (batch_size,))
-        dummy_mask = torch.ones(batch_size, seq_len, dtype=torch.bool)
-        
-        print(f"🔍 Model architecture: {config.get('architecture', 'unknown')}")
-        print(f"📏 Input shape: ({batch_size}, {seq_len}, {input_dim})")
-        
-        # Trace the model
-        traced_model = torch.jit.trace(
-            model, 
-            (dummy_trajectory, dummy_transport_mode, dummy_trip_length, dummy_mask)
-        )
-        
-        # Save traced model
-        torch.jit.save(traced_model, MODEL_PATH)
-        print(f"✅ Traced model saved: {MODEL_PATH}")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error during tracing: {e}")
-        print("💡 Tip: The model might not be compatible with TorchScript tracing")
-        print("    Alternative: Use the regular PyTorch model file with LibTorch")
-        
-        # Alternative: Save the model in a different format
-        try:
-            print("🔄 Attempting to save model without tracing...")
-            if isinstance(checkpoint, dict) and 'config' in checkpoint:
-                # Save just the state dict and config for C++
-                torch.save({
-                    'state_dict': model.state_dict(),
-                    'config': config
-                }, MODEL_PATH.with_suffix('.pth'))
-                print(f"✅ Model saved as .pth file: {MODEL_PATH.with_suffix('.pth')}")
-                return True
-        except Exception as e2:
-            print(f"❌ Alternative save also failed: {e2}")
-            
-        return False
+    # Create TorchScript wrapper
+    script_model = TorchScriptModel(model)
+    script_model.eval()
+    
+    # Create example inputs for tracing
+    transport_mode = torch.tensor([0], dtype=torch.long, device=device)  # car mode
+    trip_length = torch.tensor([150], dtype=torch.long, device=device)
+    example_inputs = (transport_mode, trip_length)
+    
+    logger.info("Converting model to TorchScript...")
+    convert_to_torchscript(script_model, example_inputs, output_path, method='trace')
+    
+    return config
 
 
-def load_preprocessing_metadata():
-    """Load metadata from preprocessing directory."""
-    metadata_pkl_path = PREPROCESSING_DIR / "metadata.pkl"
+def extract_metadata(preprocessing_dir: Path, config: dict) -> dict:
+    """Extract metadata from preprocessing directory."""
+    logger.info(f"Extracting metadata from {preprocessing_dir}")
     
-    if not metadata_pkl_path.exists():
-        print(f"❌ Preprocessing metadata not found: {metadata_pkl_path}")
-        return None
+    # Load metadata.pkl
+    with open(preprocessing_dir / "metadata.pkl", 'rb') as f:
+        metadata = pickle.load(f)
     
-    try:
-        with open(metadata_pkl_path, 'rb') as f:
-            metadata = pickle.load(f)
-        print(f"📊 Preprocessing metadata loaded: {list(metadata.keys())}")
-        return metadata
-    except Exception as e:
-        print(f"❌ Error loading preprocessing metadata: {e}")
-        return None
+    # Create simplified metadata for C++
+    cpp_metadata = {
+        "transport_modes": metadata['transport_modes'],
+        "model_config": config,
+        "sequence_length": config['sequence_length'],
+        "input_dim": config['input_dim'],
+        "latent_dim": config['latent_dim']
+    }
+    
+    return cpp_metadata
 
 
-def load_scalers():
-    """Load actual scalers from preprocessing directory."""
-    scalers_pkl_path = PREPROCESSING_DIR / "scalers.pkl"
+def extract_scalers(preprocessing_dir: Path) -> dict:
+    """Extract and convert scalers to C++ compatible format."""
+    logger.info(f"Extracting scalers from {preprocessing_dir}")
     
-    if not scalers_pkl_path.exists():
-        print(f"❌ Scalers not found: {scalers_pkl_path}")
-        return None
+    # Load scalers.pkl
+    with open(preprocessing_dir / "scalers.pkl", 'rb') as f:
+        scalers = pickle.load(f)
     
-    try:
-        with open(scalers_pkl_path, 'rb') as f:
-            scalers = pickle.load(f)
-        print(f"⚖️  Scalers loaded: {list(scalers.keys())}")
-        return scalers
-    except Exception as e:
-        print(f"❌ Error loading scalers: {e}")
-        return None
-
-
-def scalers_to_json(scalers):
-    """Convert sklearn scalers to JSON-serializable format."""
-    scalers_json = {}
+    # Convert sklearn scalers to simple mean/scale format
+    trajectory_scaler = scalers['trajectory']
     
-    for name, scaler in scalers.items():
-        if hasattr(scaler, 'mean_') and hasattr(scaler, 'scale_'):
-            # StandardScaler
-            scalers_json[name] = {
-                'type': 'StandardScaler',
-                'mean': scaler.mean_.tolist(),
-                'scale': scaler.scale_.tolist(),
-                'var': scaler.var_.tolist() if hasattr(scaler, 'var_') else None
-            }
-        elif hasattr(scaler, 'min_') and hasattr(scaler, 'scale_'):
-            # MinMaxScaler
-            scalers_json[name] = {
-                'type': 'MinMaxScaler',
-                'min': scaler.min_.tolist(),
-                'scale': scaler.scale_.tolist(),
-                'data_min': scaler.data_min_.tolist(),
-                'data_max': scaler.data_max_.tolist(),
-                'data_range': scaler.data_range_.tolist()
-            }
-        else:
-            # Fallback for unknown scaler types
-            scalers_json[name] = {
-                'type': str(type(scaler).__name__),
-                'attributes': {k: v.tolist() if hasattr(v, 'tolist') else v 
-                             for k, v in scaler.__dict__.items() 
-                             if not k.startswith('_')}
-            }
-    
-    return scalers_json
-
-
-def create_metadata():
-    """Create metadata.json from model config, preprocessing metadata, and training history."""
-    print("📄 Creating metadata...")
-    
-    # Load model configuration
-    _, model_config = load_model_metadata()
-    if model_config is None:
-        return False
-    
-    # Load preprocessing metadata
-    prep_metadata = load_preprocessing_metadata()
-    
-    # Load training history
-    history_path = RESULTS_DIR / "history.json"
-    history = {}
-    if history_path.exists():
-        try:
-            with open(history_path, 'r') as f:
-                history = json.load(f)
-        except Exception as e:
-            print(f"⚠️  Could not load training history: {e}")
-    
-    # Load sequence length
-    seq_len_path = PREPROCESSING_DIR / "sequence_length.txt"
-    sequence_length = model_config.get('sequence_length', 2000)
-    if seq_len_path.exists():
-        try:
-            with open(seq_len_path, 'r') as f:
-                sequence_length = int(f.read().strip())
-        except Exception as e:
-            print(f"⚠️  Could not read sequence_length.txt: {e}")
-    
-    # Create comprehensive metadata
-    metadata = {
-        "model": {
-            **model_config,
-            "sequence_length": sequence_length
-        },
-        "training": {
-            "epochs": len(history.get("train_loss", [])),
-            "final_train_loss": history.get("train_loss", [])[-1] if history.get("train_loss") else None,
-            "final_val_loss": history.get("val_loss", [])[-1] if history.get("val_loss") else None,
-            "best_epoch": history.get("best_epoch", None) if "best_epoch" in history else None
-        },
-        "preprocessing": prep_metadata if prep_metadata else {},
-        "created_at": "2025-07-01",
-        "files": {
-            "model": "traced_vae_model.pt",
-            "scalers": "scalers.json"
+    cpp_scalers = {
+        "trajectory": {
+            "mean": trajectory_scaler.mean_.tolist(),
+            "scale": trajectory_scaler.scale_.tolist()
         }
     }
     
-    try:
-        with open(METADATA_PATH, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
-        print(f"✅ Metadata created: {METADATA_PATH}")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error creating metadata: {e}")
-        return False
+    return cpp_scalers
 
 
-def create_scalers_json():
-    """Create scalers.json from actual saved scalers."""
-    print("⚖️  Creating scalers JSON file...")
+def render_template(template_path: Path, output_path: Path, **kwargs):
+    """Render a Jinja2 template with given variables."""
+    logger.info(f"Rendering template {template_path.name} -> {output_path.name}")
     
-    scalers = load_scalers()
-    if scalers is None:
-        return False
+    with open(template_path, 'r') as f:
+        template_content = f.read()
     
-    try:
-        scalers_json = scalers_to_json(scalers)
-        
-        with open(SCALERS_PATH, 'w') as f:
-            json.dump(scalers_json, f, indent=2)
-        
-        print(f"✅ Scalers JSON created: {SCALERS_PATH}")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error creating scalers JSON: {e}")
-        return False
-
-
-def generate_cpp_project():
-    print("📦 Generating C++ project...")
-
-    # Create missing files from actual data
-    traced_ok = create_traced_model()
-    metadata_ok = create_metadata()
-    scalers_ok = create_scalers_json()
+    template = Template(template_content)
+    rendered = template.render(**kwargs)
     
-    if not all([traced_ok, metadata_ok, scalers_ok]):
-        print("⚠️  Some files could not be created, but continuing...")
+    with open(output_path, 'w') as f:
+        f.write(rendered)
 
-    # Clean old files (except utils directory)
-    if CPP_DIR.exists():
-        for f in CPP_DIR.iterdir():
-            if f.is_file():
-                f.unlink()
-            elif f.is_dir() and f.name != "utils":
-                shutil.rmtree(f)
 
-    # Context for Jinja2 templates
-    context = {
-        "model_path": MODEL_PATH.name,
-        "metadata_path": METADATA_PATH.name,
-        "scalers_path": SCALERS_PATH.name,
+def generate_cpp_project(experiment_path: Path, cpp_project_templates: Path):
+    """Generate complete C++ project from experiment."""
+    
+    # Validate input paths
+    if not experiment_path.exists():
+        raise FileNotFoundError(f"Experiment path not found: {experiment_path}")
+    
+    model_path = experiment_path / "best_model.pt"
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    
+    # Find preprocessing directory (assuming it's in the parent directory)
+    preprocessing_dir = experiment_path.parent.parent / "preprocessing"
+    if not preprocessing_dir.exists():
+        raise FileNotFoundError(f"Preprocessing directory not found: {preprocessing_dir}")
+    
+    # Create output directory
+    experiment_name = experiment_path.name
+    output_dir = Path("cpp") / experiment_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger.info(f"Generating C++ project for experiment: {experiment_name}")
+    logger.info(f"Output directory: {output_dir}")
+    
+    # Step 1: Convert model to TorchScript
+    traced_model_path = output_dir / "traced_vae_model.pt"
+    config = convert_model_to_torchscript(model_path, traced_model_path)
+    
+    # Step 2: Extract and save metadata
+    metadata = extract_metadata(preprocessing_dir, config)
+    metadata_path = output_dir / "metadata.json"
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    # Step 3: Extract and save scalers
+    scalers = extract_scalers(preprocessing_dir)
+    scalers_path = output_dir / "scalers.json"
+    with open(scalers_path, 'w') as f:
+        json.dump(scalers, f, indent=2)
+    
+    # Step 4: Copy json.hpp header
+    json_header_src = cpp_project_templates / "json.hpp"
+    json_header_dst = output_dir / "json.hpp"
+    if json_header_src.exists():
+        shutil.copy2(json_header_src, json_header_dst)
+    else:
+        logger.warning(f"json.hpp not found at {json_header_src}, you'll need to download it manually")
+    
+    # Step 5: Generate C++ files from templates
+    template_vars = {
+        "experiment_name": experiment_name,
+        "project_name": f"{experiment_name.replace('_', '').title()}Cpp",
+        "transport_modes": metadata["transport_modes"],
+        "sequence_length": metadata["sequence_length"],
+        "input_dim": metadata["input_dim"],
+        "latent_dim": metadata["latent_dim"]
     }
-
+    
+    # Render all templates
     templates = [
-        "main.cc.jinja",
-        "trajectory_generator.h.jinja", 
-        "trajectory_generator.cc.jinja",
-        "CMakeLists.txt.jinja",
-        "README.md.jinja"
+        ("CMakeLists.txt.jinja", "CMakeLists.txt"),
+        ("main.cc.jinja", "main.cc"),
+        ("trajectory_generator.h.jinja", "trajectory_generator.h"),
+        ("trajectory_generator.cc.jinja", "trajectory_generator.cc"),
+        ("README.md.jinja", "README.md")
     ]
     
-    for tpl in templates:
-        try:
-            output_file = CPP_DIR / tpl.replace(".jinja", "")
-            render_template(tpl, output_file, context)
-            print(f"✅ Template generated: {output_file.name}")
-        except Exception as e:
-            print(f"❌ Error with template {tpl}: {e}")
-
-    # Copy placeholder files
-    try:
-        copy_placeholder("json.hpp.placeholder")
-        print("✅ json.hpp copied")
-    except Exception as e:
-        print(f"❌ Error copying json.hpp: {e}")
-
-    # Copy the generated files to cpp directory
-    for file in [MODEL_PATH, METADATA_PATH, SCALERS_PATH]:
-        if file.exists():
-            try:
-                shutil.copyfile(file, CPP_DIR / file.name)
-                print(f"✅ File copied: {file.name}")
-            except Exception as e:
-                print(f"❌ Error copying {file.name}: {e}")
+    for template_name, output_name in templates:
+        template_path = cpp_project_templates / template_name
+        output_path = output_dir / output_name
+        
+        if template_path.exists():
+            render_template(template_path, output_path, **template_vars)
         else:
-            print(f"⚠️  Missing file: {file}")
+            logger.warning(f"Template not found: {template_path}")
+    
+    # Step 6: Create build script
+    build_script_content = f"""#!/bin/bash
+# Build script for {experiment_name} C++ project
 
-    print(f"\n🎉 C++ project generated in: {CPP_DIR}")
-    print("\n📋 Next steps:")
-    print("   1. cd cpp")
-    print("   2. mkdir build && cd build")
-    print("   3. cmake ..")
-    print("   4. make")
+set -e
+
+echo "Building {experiment_name} C++ trajectory generator..."
+
+# Create build directory
+mkdir -p build
+cd build
+
+# Configure with CMake
+cmake ..
+
+# Build
+make -j$(nproc)
+
+echo "Build complete! Executable: ./run_trajectory_gen"
+echo "Run with: ./build/run_trajectory_gen"
+"""
+    
+    build_script_path = output_dir / "build.sh"
+    with open(build_script_path, 'w') as f:
+        f.write(build_script_content)
+    build_script_path.chmod(0o755)  # Make executable
+    
+    logger.info(f"C++ project generated successfully in: {output_dir}")
+    logger.info("Files created:")
+    for file_path in sorted(output_dir.rglob("*")):
+        if file_path.is_file():
+            logger.info(f"  {file_path.relative_to(output_dir)}")
+    
+    logger.info(f"\nTo build and run:")
+    logger.info(f"  cd {output_dir}")
+    logger.info(f"  ./build.sh")
+    logger.info(f"  ./build/run_trajectory_gen")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate C++ project from trained VAE model")
+    parser.add_argument("experiment_path", type=Path, 
+                       help="Path to experiment directory (e.g., results/efficient_run)")
+    parser.add_argument("--cpp-templates", type=Path, default="cpp_project",
+                       help="Path to C++ project templates directory")
+    
+    args = parser.parse_args()
+    
+    try:
+        generate_cpp_project(args.experiment_path, args.cpp_templates)
+    except Exception as e:
+        logger.error(f"Failed to generate C++ project: {e}")
+        return 1
+    
+    return 0
 
 
 if __name__ == "__main__":
-    generate_cpp_project()
+    exit(main())
