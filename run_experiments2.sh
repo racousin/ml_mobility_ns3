@@ -11,31 +11,8 @@ DRY_RUN=${4:-false}
 # Create results directory
 mkdir -p ${BASE_RESULTS_DIR}
 
-# Function to estimate GPU memory usage
-estimate_gpu_memory() {
-    local batch_size=$1
-    local hidden_dim=$2
-    local num_layers=$3
-    local architecture=$4
-    local use_gan=$5
-    
-    # Rough estimation in GB (conservative)
-    local base_mem=2.0  # Base memory for model and data
-    local layer_mem=$(echo "$num_layers * 0.5" | bc -l)
-    local hidden_mem=$(echo "$hidden_dim * 0.008" | bc -l)
-    local batch_mem=$(echo "$batch_size * 0.05" | bc -l)
-    
-    if [ "$architecture" = "attention" ]; then
-        base_mem=$(echo "$base_mem + 1.0" | bc -l)
-    fi
-    
-    if [ "$use_gan" = true ]; then
-        base_mem=$(echo "$base_mem * 1.8" | bc -l)
-    fi
-    
-    local total_mem=$(echo "$base_mem + $layer_mem + $hidden_mem + $batch_mem" | bc -l)
-    echo $total_mem
-}
+# Note: GPU memory estimation removed for simplicity
+# All experiments are designed to fit in 40GB GPU memory
 
 # Function to run a single experiment
 run_experiment() {
@@ -48,15 +25,6 @@ run_experiment() {
     local beta=$7
     local use_gan=$8
     local additional_args=$9
-    
-    # Estimate memory usage
-    local mem_usage=$(estimate_gpu_memory $batch_size $hidden_dim $num_layers $architecture $use_gan)
-    echo "Estimated GPU memory usage: ${mem_usage} GB"
-    
-    if (( $(echo "$mem_usage > 38" | bc -l) )); then
-        echo "WARNING: Estimated memory usage exceeds 38GB. Skipping experiment: $exp_name"
-        return
-    fi
     
     local results_dir="${BASE_RESULTS_DIR}/${exp_name}"
     
@@ -105,8 +73,7 @@ run_experiment() {
     \"experiment_name\": \"$exp_name\",
     \"command\": \"$cmd\",
     \"start_time\": \"$(date)\",
-    \"gpu_id\": $GPU_ID,
-    \"estimated_gpu_memory_gb\": $mem_usage
+    \"gpu_id\": $GPU_ID
 }" > "$results_dir/experiment_info.json"
         
         # Run the experiment
@@ -118,8 +85,7 @@ run_experiment() {
     \"command\": \"$cmd\",
     \"start_time\": \"$(date)\",
     \"end_time\": \"$(date)\",
-    \"gpu_id\": $GPU_ID,
-    \"estimated_gpu_memory_gb\": $mem_usage
+    \"gpu_id\": $GPU_ID
 }" > "$results_dir/experiment_info.json"
     else
         echo "DRY RUN - Skipping execution"
