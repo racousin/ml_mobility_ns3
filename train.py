@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # train.py
-"""Training script for the Conditional Trajectory VAE with architecture choice."""
+"""Training script for the Conditional Trajectory VAE with optional VAE-GAN training."""
 
 import argparse
 import logging
@@ -15,14 +15,14 @@ import json
 import sys
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from ml_mobility_ns3.models.vae import ConditionalTrajectoryVAE
+from ml_mobility_ns3.models.vae import ConditionalTrajectoryVAE, TrajectoryDiscriminator
 from ml_mobility_ns3.training.trainer import VAETrainer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def main():
-    parser = argparse.ArgumentParser(description="Train Conditional Trajectory VAE")
+    parser = argparse.ArgumentParser(description="Train Conditional Trajectory VAE or VAE-GAN")
     
     # Data arguments
     parser.add_argument("--data-path", type=Path, required=True, help="Path to the preprocessed VAE dataset (.npz file)")
@@ -51,9 +51,29 @@ def main():
     parser.add_argument("--pooling", type=str, default='mean', choices=['mean', 'max', 'cls'],
                         help="Pooling method for attention architecture")
     
+    # VAE-GAN specific arguments
+    parser.add_argument("--use-gan", action='store_true', help="Use VAE-GAN training instead of standard VAE")
+    parser.add_argument("--disc-lr", type=float, default=1e-4, help="Discriminator learning rate")
+    parser.add_argument("--gamma", type=float, default=1.0, help="Weight for GAN loss in VAE-GAN")
+    parser.add_argument("--disc-update-freq", type=int, default=1, help="Update discriminator every N generator updates")
+    parser.add_argument("--disc-hidden-dim", type=int, default=128, help="Discriminator hidden dimension")
+    parser.add_argument("--disc-num-layers", type=int, default=2, help="Number of discriminator layers")
+    
     # Hardware arguments
     parser.add_argument("--device", type=str, default=None, help="Device to use (e.g., 'cuda', 'cpu')")
     parser.add_argument("--gpu-id", type=int, default=0, help="GPU ID to use if running on CUDA")
+    
+    # Learning rate scheduler arguments
+    parser.add_argument("--lr-patience", type=int, default=10, help="Patience for learning rate scheduler")
+    parser.add_argument("--lr-factor", type=float, default=0.5, help="Factor to reduce learning rate")
+    parser.add_argument("--lr-min", type=float, default=1e-6, help="Minimum learning rate")
+    
+    # Early stopping arguments
+    parser.add_argument("--early-stopping-patience", type=int, default=20, help="Patience for early stopping")
+    parser.add_argument("--early-stopping-delta", type=float, default=1e-4, help="Minimum improvement for early stopping")
+    
+    # Resume training
+    parser.add_argument("--resume", type=Path, default=None, help="Path to checkpoint to resume training from")
     
     args = parser.parse_args()
     
@@ -129,31 +149,69 @@ def main():
         }
         logger.info(f"Using attention architecture with params: {attention_params}")
     
-    # Create model
-    logger.info(f"Creating {args.architecture.upper()} VAE model...")
-    model = ConditionalTrajectoryVAE(
-        input_dim=trajectories.shape[-1],
-        sequence_length=trajectories.shape[1],
-        hidden_dim=args.hidden_dim,
-        latent_dim=args.latent_dim,
-        num_layers=args.num_layers,
-        num_transport_modes=len(metadata['transport_modes']),
-        condition_dim=args.condition_dim,
-        architecture=args.architecture,
-        attention_params=attention_params,
-    )
+    if args.resume:
+        # Resume from checkpoint
+        logger.info(f"Resuming from checkpoint: {args.resume}")
+        trainer = VAETrainer.load_checkpoint(args.resume, device=device)
+        model = trainer.model
+        discriminator = trainer.discriminator if args.use_gan else None
+    else:
+        # Create new model
+        logger.info(f"Creating {args.architecture.upper()} VAE model...")
+        model = ConditionalTrajectoryVAE(
+            input_dim=trajectories.shape[-1],
+            sequence_length=trajectories.shape[1],
+            hidden_dim=args.hidden_dim,
+            latent_dim=args.latent_dim,
+            num_layers=args.num_layers,
+            num_transport_modes=len(metadata['transport_modes']),
+            condition_dim=args.condition_dim,
+            architecture=args.architecture,
+            attention_params=attention_params,
+        )
+        
+        # Create discriminator if using GAN
+        discriminator = None
+        if args.use_gan:
+            logger.info(f"Creating {args.architecture.upper()} discriminator...")
+            disc_attention_params = None
+            if args.architecture == 'attention':
+                disc_attention_params = {
+                    'n_heads': args.n_heads,
+                    'd_ff': args.disc_hidden_dim * 4,
+                    'dropout': args.dropout,
+                    'pooling': args.pooling,
+                }
+            
+            discriminator = TrajectoryDiscriminator(
+                input_dim=trajectories.shape[-1],
+                sequence_length=trajectories.shape[1],
+                hidden_dim=args.disc_hidden_dim,
+                num_layers=args.disc_num_layers,
+                num_transport_modes=len(metadata['transport_modes']),
+                condition_dim=args.condition_dim,
+                architecture=args.architecture,
+                attention_params=disc_attention_params,
+            )
     
     # Log model parameters
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info(f"Total parameters: {total_params:,}")
-    logger.info(f"Trainable parameters: {trainable_params:,}")
+    logger.info(f"VAE total parameters: {total_params:,}")
+    logger.info(f"VAE trainable parameters: {trainable_params:,}")
+    
+    if discriminator is not None:
+        disc_params = sum(p.numel() for p in discriminator.parameters())
+        logger.info(f"Discriminator parameters: {disc_params:,}")
+        logger.info(f"Total model parameters: {total_params + disc_params:,}")
     
     # Save configuration
-    results_dir = args.results_dir / f"{args.architecture}_vae"
+    model_type = "vae_gan" if args.use_gan else "vae"
+    results_dir = args.results_dir / f"{args.architecture}_{model_type}"
     results_dir.mkdir(parents=True, exist_ok=True)
     
     config = {
+        'model_type': model_type,
         'data_path': str(args.data_path),
         'architecture': args.architecture,
         'model_config': model.get_config(),
@@ -167,18 +225,40 @@ def main():
         'device': device,
     }
     
+    if args.use_gan:
+        config['gan_config'] = {
+            'disc_lr': args.disc_lr,
+            'gamma': args.gamma,
+            'disc_update_freq': args.disc_update_freq,
+            'disc_hidden_dim': args.disc_hidden_dim,
+            'disc_num_layers': args.disc_num_layers,
+        }
+    
     with open(results_dir / 'config.json', 'w') as f:
         json.dump(config, f, indent=4)
     
-    # Train
-    logger.info("Starting training...")
-    trainer = VAETrainer(
-        model,
-        device=device,
-        learning_rate=args.lr,
-        beta=args.beta,
-    )
+    # Create trainer
+    if not args.resume:
+        logger.info(f"Creating {'VAE-GAN' if args.use_gan else 'VAE'} trainer...")
+        trainer = VAETrainer(
+            model,
+            device=device,
+            learning_rate=args.lr,
+            beta=args.beta,
+            use_gan=args.use_gan,
+            discriminator=discriminator,
+            disc_lr=args.disc_lr if args.use_gan else None,
+            gamma=args.gamma if args.use_gan else None,
+            disc_update_freq=args.disc_update_freq if args.use_gan else None,
+            lr_scheduler_patience=args.lr_patience,
+            lr_scheduler_factor=args.lr_factor,
+            lr_scheduler_min_lr=args.lr_min,
+            early_stopping_patience=args.early_stopping_patience,
+            early_stopping_min_delta=args.early_stopping_delta,
+        )
     
+    # Train
+    logger.info(f"Starting {'VAE-GAN' if args.use_gan else 'VAE'} training...")
     trainer.fit(
         train_loader,
         val_loader,

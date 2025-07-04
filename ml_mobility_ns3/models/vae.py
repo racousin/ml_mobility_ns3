@@ -85,6 +85,160 @@ class TransformerEncoderLayer(nn.Module):
         return x
 
 
+class TrajectoryDiscriminator(nn.Module):
+    """Discriminator for trajectory sequences with conditional information."""
+    
+    def __init__(
+        self,
+        input_dim: int = 3,
+        sequence_length: int = 2000,
+        hidden_dim: int = 128,
+        num_layers: int = 2,
+        num_transport_modes: int = 10,
+        condition_dim: int = 32,
+        architecture: str = 'lstm',
+        attention_params: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__()
+        self.input_dim = input_dim
+        self.sequence_length = sequence_length
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.condition_dim = condition_dim
+        self.architecture = architecture
+        
+        # Default attention parameters
+        if attention_params is None:
+            attention_params = {}
+        self.n_heads = attention_params.get('n_heads', 8)
+        self.d_ff = attention_params.get('d_ff', hidden_dim * 4)
+        self.dropout = attention_params.get('dropout', 0.1)
+        self.pooling = attention_params.get('pooling', 'mean')
+        
+        # Condition embeddings (same as VAE)
+        self.transport_mode_embedding = nn.Embedding(num_transport_modes, condition_dim)
+        self.length_projection = nn.Linear(1, condition_dim)
+        
+        # Total condition dimension
+        total_condition_dim = condition_dim * 2
+        
+        # Input projection for combining trajectory with conditions
+        self.input_projection = nn.Linear(input_dim + total_condition_dim, hidden_dim)
+        
+        if self.architecture == 'lstm':
+            self.lstm = nn.LSTM(
+                hidden_dim, hidden_dim, num_layers, 
+                batch_first=True, bidirectional=True
+            )
+            classifier_input_dim = hidden_dim * 2
+        elif self.architecture == 'attention':
+            self.positional_encoding = self._create_positional_encoding()
+            self.encoder_layers = nn.ModuleList([
+                TransformerEncoderLayer(hidden_dim, self.n_heads, self.d_ff, self.dropout)
+                for _ in range(num_layers)
+            ])
+            if self.pooling == 'cls':
+                self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
+            classifier_input_dim = hidden_dim
+        
+        # Binary classifier
+        self.classifier = nn.Sequential(
+            nn.Linear(classifier_input_dim, hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.3),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.3),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+    
+    def _create_positional_encoding(self) -> torch.Tensor:
+        """Create sinusoidal positional encoding."""
+        pe = torch.zeros(self.sequence_length, self.hidden_dim)
+        position = torch.arange(0, self.sequence_length).unsqueeze(1).float()
+        div_term = torch.exp(torch.arange(0, self.hidden_dim, 2).float() * 
+                            -(math.log(10000.0) / self.hidden_dim))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        return nn.Parameter(pe.unsqueeze(0), requires_grad=False)
+    
+    def get_conditions(self, transport_mode: torch.Tensor, trip_length: torch.Tensor) -> torch.Tensor:
+        """Create condition embeddings (same as VAE)."""
+        mode_embed = self.transport_mode_embedding(transport_mode)
+        length_normalized = trip_length.unsqueeze(-1).float() / self.sequence_length
+        length_embed = self.length_projection(length_normalized)
+        conditions = torch.cat([mode_embed, length_embed], dim=-1)
+        return conditions
+    
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        transport_mode: torch.Tensor,
+        trip_length: torch.Tensor,
+        mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """Forward pass returning logits for real/fake classification."""
+        batch_size, seq_len, _ = x.size()
+        
+        # Get conditions
+        conditions = self.get_conditions(transport_mode, trip_length)
+        
+        # Expand conditions to match sequence length
+        conditions_expanded = conditions.unsqueeze(1).expand(batch_size, seq_len, -1)
+        
+        # Concatenate trajectory with conditions
+        x_conditioned = torch.cat([x, conditions_expanded], dim=-1)
+        
+        # Project to hidden dimension
+        x_hidden = self.input_projection(x_conditioned)
+        
+        if self.architecture == 'lstm':
+            # LSTM processing
+            output, (h, _) = self.lstm(x_hidden)
+            # Use final hidden states
+            h = torch.cat([h[-2], h[-1]], dim=1)
+            features = h
+        elif self.architecture == 'attention':
+            # Add positional encoding
+            x_hidden = x_hidden + self.positional_encoding[:, :seq_len, :]
+            
+            # Add CLS token if using CLS pooling
+            if self.pooling == 'cls':
+                cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+                x_hidden = torch.cat([cls_tokens, x_hidden], dim=1)
+                if mask is not None:
+                    cls_mask = torch.ones(batch_size, 1, device=mask.device, dtype=mask.dtype)
+                    mask = torch.cat([cls_mask, mask], dim=1)
+            
+            # Pass through transformer layers
+            for layer in self.encoder_layers:
+                x_hidden = layer(x_hidden, mask)
+            
+            # Pool to get sequence representation
+            if self.pooling == 'cls':
+                features = x_hidden[:, 0, :]
+            elif self.pooling == 'mean':
+                if mask is not None:
+                    if self.pooling == 'cls':
+                        mask_for_mean = mask[:, 1:]
+                        x_for_mean = x_hidden[:, 1:, :]
+                    else:
+                        mask_for_mean = mask
+                        x_for_mean = x_hidden
+                    mask_expanded = mask_for_mean.unsqueeze(-1).expand_as(x_for_mean)
+                    features = (x_for_mean * mask_expanded).sum(dim=1) / mask_expanded.sum(dim=1)
+                else:
+                    features = x_hidden.mean(dim=1)
+            elif self.pooling == 'max':
+                features, _ = x_hidden.max(dim=1)
+        
+        # Binary classification
+        logits = self.classifier(features)
+        return logits.squeeze(-1)
+
+
 class ConditionalTrajectoryVAE(nn.Module):
     """Conditional VAE for trajectory generation with transport mode and length conditioning."""
     
@@ -442,3 +596,87 @@ def masked_vae_loss(
         'kl_loss': kl_loss.item(),
         'num_valid_points': num_valid.item()
     }
+
+
+def vae_gan_loss(
+    recon: torch.Tensor,
+    x: torch.Tensor,
+    mu: torch.Tensor,
+    logvar: torch.Tensor,
+    mask: torch.Tensor,
+    disc_real_logits: torch.Tensor,
+    disc_fake_logits: torch.Tensor,
+    disc_recon_logits: torch.Tensor,
+    beta: float = 1.0,
+    gamma: float = 1.0,
+) -> Tuple[Dict[str, torch.Tensor], Dict[str, float]]:
+    """
+    VAE-GAN loss function combining VAE and GAN objectives.
+    
+    Args:
+        recon: Reconstructed trajectories
+        x: Original trajectories
+        mu: Latent mean
+        logvar: Latent log variance
+        mask: Binary mask for valid positions
+        disc_real_logits: Discriminator logits for real data
+        disc_fake_logits: Discriminator logits for generated data
+        disc_recon_logits: Discriminator logits for reconstructed data
+        beta: Weight for KL loss
+        gamma: Weight for GAN loss
+    
+    Returns:
+        losses: Dictionary of individual loss tensors
+        metrics: Dictionary of loss values for logging
+    """
+    # VAE losses
+    vae_loss, vae_metrics = masked_vae_loss(recon, x, mu, logvar, mask, beta)
+    
+    # GAN losses
+    # Generator losses (want discriminator to think fake/reconstructed are real)
+    gen_loss_fake = F.binary_cross_entropy_with_logits(
+        disc_fake_logits, torch.ones_like(disc_fake_logits)
+    )
+    gen_loss_recon = F.binary_cross_entropy_with_logits(
+        disc_recon_logits, torch.ones_like(disc_recon_logits)
+    )
+    gen_loss = gen_loss_fake + gen_loss_recon
+    
+    # Discriminator losses
+    disc_loss_real = F.binary_cross_entropy_with_logits(
+        disc_real_logits, torch.ones_like(disc_real_logits)
+    )
+    disc_loss_fake = F.binary_cross_entropy_with_logits(
+        disc_fake_logits, torch.zeros_like(disc_fake_logits)
+    )
+    disc_loss_recon = F.binary_cross_entropy_with_logits(
+        disc_recon_logits, torch.zeros_like(disc_recon_logits)
+    )
+    disc_loss = disc_loss_real + disc_loss_fake + disc_loss_recon
+    
+    # Combined generator loss (VAE + GAN objectives)
+    total_gen_loss = vae_loss + gamma * gen_loss
+    
+    losses = {
+        'gen_total': total_gen_loss,
+        'disc_total': disc_loss,
+        'vae': vae_loss,
+        'gen': gen_loss,
+        'disc_real': disc_loss_real,
+        'disc_fake': disc_loss_fake,
+        'disc_recon': disc_loss_recon,
+    }
+    
+    metrics = {
+        'loss': total_gen_loss.item(),
+        'disc_loss': disc_loss.item(),
+        'recon_loss': vae_metrics['recon_loss'],
+        'kl_loss': vae_metrics['kl_loss'],
+        'gen_loss': gen_loss.item(),
+        'disc_loss_real': disc_loss_real.item(),
+        'disc_loss_fake': disc_loss_fake.item(),
+        'disc_loss_recon': disc_loss_recon.item(),
+        'num_valid_points': vae_metrics['num_valid_points'],
+    }
+    
+    return losses, metrics

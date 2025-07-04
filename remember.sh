@@ -10,20 +10,6 @@ python ./train.py \
 
 python ./train.py \
     --data-path ./preprocessing/vae_dataset.npz \
-    --results-dir results/efficient_run_lstm_gpu \
-    --epochs 150 \
-    --batch-size 128 \
-    --lr 1e-4 \
-    --beta 0.001 \
-    --hidden-dim 512 \
-    --latent-dim 64 \
-    --num-layers 2 \
-    --device cuda \
-    --gpu-id 0
-
-
-python ./train.py \
-    --data-path ./preprocessing/vae_dataset.npz \
     --results-dir results/test_run_attention_gpu \
     --epochs 5 \
     --batch-size 32 \
@@ -39,25 +25,6 @@ python ./train.py \
 
 python ./train.py \
     --data-path ./preprocessing/vae_dataset.npz \
-    --results-dir results/complex_attention_gpu \
-    --epochs 100 \
-    --batch-size 64 \
-    --lr 5e-5 \
-    --beta 0.002 \
-    --architecture attention \
-    --hidden-dim 768 \
-    --latent-dim 128 \
-    --num-layers 4 \
-    --n-heads 8 \
-    --d-ff 2048 \
-    --dropout 0.15 \
-    --use-causal-mask \
-    --pooling cls \
-    --device cuda \
-    --gpu-id 0
-
-python ./train.py \
-    --data-path ./preprocessing/vae_dataset.npz \
     --results-dir results/large_lstm_gpu \
     --epochs 200 \
     --batch-size 256 \
@@ -69,21 +36,32 @@ python ./train.py \
     --device cuda \
     --gpu-id 0
 
-python ./train.py \
-    --data-path ./preprocessing/vae_dataset.npz \
-    --results-dir results/attention_beta_dropout_gpu \
-    --epochs 75 \
-    --batch-size 128 \
-    --lr 1e-4 \
-    --beta 0.01 \
-    --architecture attention \
-    --hidden-dim 512 \
-    --latent-dim 64 \
-    --num-layers 3 \
-    --n-heads 8 \
-    --dropout 0.2 \
-    --device cuda \
-    --gpu-id 0
+# Run experiments on GPU 2
+chmod +x run_experiments.sh
+./run_experiments.sh 2 ./preprocessing/vae_dataset.npz results/batch_experiments
+
+# Dry run to see what would be executed
+./run_experiments.sh 2 ./preprocessing/vae_dataset.npz results/test_run true
+
+# Generate full report
+python analyze_results.py --results-dir results/experiments --generate-report
+
+# Plot specific experiments
+python analyze_results.py --results-dir results/experiments \
+    --experiments lstm_vae_small attention_vae_medium \
+    --plot-curves --plot-lr
+
+# Analyze early stopping
+python analyze_results.py --results-dir results/experiments --early-stopping
+
+# Generate sample trajectories
+python analyze_results.py --results-dir results/experiments \
+    --sample-trajectories results/experiments/lstm_vae_medium/best_model.pt
+
+# Compare generation from multiple models
+python analyze_results.py --results-dir results/experiments \
+    --compare-generation results/experiments/*/best_model.pt
+
 
 
 cd cpp
