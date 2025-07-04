@@ -36,7 +36,21 @@ class TrainingAnalyzer:
             if exp_dir.is_dir():
                 exp_data = {}
                 
-                # Load experiment info
+                # Check if this is a nested structure (look for subdirectory with same base name)
+                # e.g., lstm_vae_small/lstm_vae/
+                nested_dirs = [d for d in exp_dir.iterdir() if d.is_dir()]
+                
+                # Determine the actual data directory
+                data_dir = exp_dir
+                if nested_dirs:
+                    # Check if there's a subdirectory that looks like it contains the actual data
+                    for nested in nested_dirs:
+                        if (nested / "history.json").exists():
+                            data_dir = nested
+                            print(f"Found nested structure: {exp_dir.name} -> {nested.name}")
+                            break
+                
+                # Load experiment info (might be in parent dir)
                 info_file = exp_dir / "experiment_info.json"
                 if info_file.exists():
                     try:
@@ -44,21 +58,20 @@ class TrainingAnalyzer:
                             exp_data['info'] = json.load(f)
                     except (json.JSONDecodeError, IOError) as e:
                         print(f"Warning: Failed to load {info_file}: {e}")
-                        continue
+                        # Don't continue here - we might still have valid data in nested dir
                 
-                # Load training history
-                history_file = exp_dir / "history.json"
+                # Load training history from data directory
+                history_file = data_dir / "history.json"
                 if history_file.exists():
                     try:
                         with open(history_file) as f:
                             exp_data['history'] = json.load(f)
                     except (json.JSONDecodeError, IOError) as e:
                         print(f"Warning: Failed to load {history_file}: {e}")
-                        # If history fails, skip this experiment
                         continue
                 
-                # Load config
-                config_file = exp_dir / "config.json"
+                # Load config from data directory
+                config_file = data_dir / "config.json"
                 if config_file.exists():
                     try:
                         with open(config_file) as f:
@@ -70,6 +83,7 @@ class TrainingAnalyzer:
                 # Only add experiment if we have at least history data
                 if 'history' in exp_data:
                     experiments[exp_dir.name] = exp_data
+                    experiments[exp_dir.name]['data_dir'] = str(data_dir)
                     print(f"Loaded experiment: {exp_dir.name}")
                 else:
                     print(f"Skipping {exp_dir.name} - no valid history data")
