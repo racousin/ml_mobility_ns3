@@ -13,6 +13,10 @@ from typing import Dict, List, Optional, Tuple
 import torch
 
 # Set style
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for server
+import matplotlib.pyplot as plt
+import seaborn as sns
 plt.style.use('seaborn-v0_8-darkgrid')
 sns.set_palette("husl")
 
@@ -35,24 +39,42 @@ class TrainingAnalyzer:
                 # Load experiment info
                 info_file = exp_dir / "experiment_info.json"
                 if info_file.exists():
-                    with open(info_file) as f:
-                        exp_data['info'] = json.load(f)
+                    try:
+                        with open(info_file) as f:
+                            exp_data['info'] = json.load(f)
+                    except (json.JSONDecodeError, IOError) as e:
+                        print(f"Warning: Failed to load {info_file}: {e}")
+                        continue
                 
                 # Load training history
                 history_file = exp_dir / "history.json"
                 if history_file.exists():
-                    with open(history_file) as f:
-                        exp_data['history'] = json.load(f)
+                    try:
+                        with open(history_file) as f:
+                            exp_data['history'] = json.load(f)
+                    except (json.JSONDecodeError, IOError) as e:
+                        print(f"Warning: Failed to load {history_file}: {e}")
+                        # If history fails, skip this experiment
+                        continue
                 
                 # Load config
                 config_file = exp_dir / "config.json"
                 if config_file.exists():
-                    with open(config_file) as f:
-                        exp_data['config'] = json.load(f)
+                    try:
+                        with open(config_file) as f:
+                            exp_data['config'] = json.load(f)
+                    except (json.JSONDecodeError, IOError) as e:
+                        print(f"Warning: Failed to load {config_file}: {e}")
+                        # Config is optional, so we can continue
                 
-                if exp_data:
+                # Only add experiment if we have at least history data
+                if 'history' in exp_data:
                     experiments[exp_dir.name] = exp_data
+                    print(f"Loaded experiment: {exp_dir.name}")
+                else:
+                    print(f"Skipping {exp_dir.name} - no valid history data")
                     
+        print(f"\nSuccessfully loaded {len(experiments)} experiments")
         return experiments
     
     def plot_training_curves(self, experiment_names: Optional[List[str]] = None, 
@@ -100,8 +122,12 @@ class TrainingAnalyzer:
         
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print(f"Saved training curves to: {save_path}")
         else:
-            plt.show()
+            plt.savefig('training_curves.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print("Saved training curves to: training_curves.png")
     
     def plot_learning_rates(self, experiment_names: Optional[List[str]] = None,
                           save_path: Optional[Path] = None):
@@ -138,8 +164,12 @@ class TrainingAnalyzer:
         
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print(f"Saved learning rates to: {save_path}")
         else:
-            plt.show()
+            plt.savefig('learning_rates.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print("Saved learning rates to: learning_rates.png")
     
     def compare_final_metrics(self, save_path: Optional[Path] = None):
         """Create a comparison table of final metrics across experiments."""
@@ -149,7 +179,8 @@ class TrainingAnalyzer:
             history = exp_data.get('history', {})
             config = exp_data.get('config', {})
             
-            if not history:
+            if not history or 'val_loss' not in history or len(history['val_loss']) == 0:
+                print(f"Warning: Skipping {exp_name} - no validation loss data")
                 continue
             
             row = {
@@ -174,6 +205,11 @@ class TrainingAnalyzer:
             data.append(row)
         
         df = pd.DataFrame(data)
+        
+        if df.empty:
+            print("Warning: No valid experiments found with metrics to compare")
+            return df
+            
         df = df.sort_values('Best Val Loss')
         
         # Display table
@@ -225,6 +261,7 @@ class TrainingAnalyzer:
             
             plt.tight_layout()
             plt.savefig(save_path.with_suffix('.png'), dpi=300, bbox_inches='tight')
+            plt.close(fig)
             print(f"Plots saved to: {save_path.with_suffix('.png')}")
         
         return df
@@ -299,8 +336,12 @@ class TrainingAnalyzer:
         
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print(f"Saved GAN metrics to: {save_path}")
         else:
-            plt.show()
+            plt.savefig('gan_metrics.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print("Saved GAN metrics to: gan_metrics.png")
     
     def analyze_early_stopping(self):
         """Analyze early stopping behavior across experiments."""
@@ -349,32 +390,56 @@ class TrainingAnalyzer:
         
         print("Generating comprehensive report...")
         
+        if not self.experiments:
+            print("Error: No valid experiments found to analyze")
+            return
+        
         # 1. Training curves for all experiments
         print("Plotting training curves...")
-        self.plot_training_curves(
-            metrics=['loss', 'recon_loss', 'kl_loss'],
-            save_path=output_dir / 'training_curves.png'
-        )
+        try:
+            self.plot_training_curves(
+                metrics=['loss', 'recon_loss', 'kl_loss'],
+                save_path=output_dir / 'training_curves.png'
+            )
+        except Exception as e:
+            print(f"Warning: Failed to plot training curves: {e}")
         
         # 2. Learning rate schedules
         print("Plotting learning rates...")
-        self.plot_learning_rates(save_path=output_dir / 'learning_rates.png')
+        try:
+            self.plot_learning_rates(save_path=output_dir / 'learning_rates.png')
+        except Exception as e:
+            print(f"Warning: Failed to plot learning rates: {e}")
         
         # 3. Final metrics comparison
         print("Comparing final metrics...")
-        metrics_df = self.compare_final_metrics(save_path=output_dir / 'metrics_comparison')
+        try:
+            metrics_df = self.compare_final_metrics(save_path=output_dir / 'metrics_comparison')
+        except Exception as e:
+            print(f"Warning: Failed to compare metrics: {e}")
+            metrics_df = pd.DataFrame()
         
         # 4. GAN metrics if applicable
         print("Plotting GAN metrics...")
-        self.plot_gan_metrics(save_path=output_dir / 'gan_metrics.png')
+        try:
+            self.plot_gan_metrics(save_path=output_dir / 'gan_metrics.png')
+        except Exception as e:
+            print(f"Warning: Failed to plot GAN metrics: {e}")
         
         # 5. Early stopping analysis
         print("Analyzing early stopping...")
-        early_stop_df = self.analyze_early_stopping()
-        early_stop_df.to_csv(output_dir / 'early_stopping_analysis.csv', index=False)
+        try:
+            early_stop_df = self.analyze_early_stopping()
+            early_stop_df.to_csv(output_dir / 'early_stopping_analysis.csv', index=False)
+        except Exception as e:
+            print(f"Warning: Failed to analyze early stopping: {e}")
+            early_stop_df = pd.DataFrame()
         
         # 6. Generate summary markdown report
-        self._generate_markdown_report(output_dir, metrics_df, early_stop_df)
+        if not metrics_df.empty:
+            self._generate_markdown_report(output_dir, metrics_df, early_stop_df)
+        else:
+            print("Warning: Unable to generate markdown report due to insufficient data")
         
         print(f"\nReport generated in: {output_dir}")
     
@@ -526,8 +591,12 @@ def plot_sample_trajectories(checkpoint_path: Path, n_samples: int = 5,
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved sample trajectories to: {save_path}")
     else:
-        plt.show()
+        plt.savefig('sample_trajectories.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print("Saved sample trajectories to: sample_trajectories.png")
 
 
 def compare_models_generation(checkpoint_paths: List[Path], n_samples: int = 10,
@@ -594,8 +663,50 @@ def compare_models_generation(checkpoint_paths: List[Path], n_samples: int = 10,
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved model comparison to: {save_path}")
     else:
-        plt.show()
+        plt.savefig('model_comparison.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print("Saved model comparison to: model_comparison.png")
+
+
+def fix_corrupted_json_files(results_dir: Path):
+    """Attempt to fix corrupted JSON files in the results directory."""
+    fixed_count = 0
+    
+    for exp_dir in results_dir.iterdir():
+        if exp_dir.is_dir():
+            # Check experiment_info.json
+            info_file = exp_dir / "experiment_info.json"
+            if info_file.exists():
+                try:
+                    with open(info_file) as f:
+                        json.load(f)
+                except json.JSONDecodeError:
+                    print(f"Fixing corrupted file: {info_file}")
+                    try:
+                        # Read the file content
+                        with open(info_file, 'r') as f:
+                            content = f.read()
+                        
+                        # Try to extract valid JSON by finding the last complete brace
+                        if content.strip() and not content.strip().endswith('}'):
+                            # Find the last complete JSON object
+                            last_brace = content.rfind('}')
+                            if last_brace > 0:
+                                fixed_content = content[:last_brace + 1]
+                                # Validate it's proper JSON
+                                json.loads(fixed_content)
+                                # Write back
+                                with open(info_file, 'w') as f:
+                                    f.write(fixed_content)
+                                fixed_count += 1
+                                print(f"  Fixed: {info_file}")
+                    except Exception as e:
+                        print(f"  Could not fix {info_file}: {e}")
+    
+    print(f"\nFixed {fixed_count} corrupted JSON files")
 
 
 def main():
@@ -623,7 +734,16 @@ def main():
     parser.add_argument("--compare-generation", nargs="+", type=Path, default=None,
                        help="Compare generation from multiple checkpoints")
     
+    parser.add_argument("--fix-json", action="store_true",
+                       help="Attempt to fix corrupted JSON files before analysis")
+    
     args = parser.parse_args()
+    
+    # Fix corrupted JSON files if requested
+    if args.fix_json:
+        print("Attempting to fix corrupted JSON files...")
+        fix_corrupted_json_files(args.results_dir)
+        print("")
     
     # Create analyzer
     analyzer = TrainingAnalyzer(args.results_dir)
