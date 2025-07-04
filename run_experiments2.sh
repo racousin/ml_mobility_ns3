@@ -1,11 +1,11 @@
 #!/bin/bash
-# run_experiments.sh
-# Script to run multiple VAE/VAE-GAN experiments with different configurations
+# run_experiments_2.sh
+# Second script with different experiments to run on another GPU in parallel
 
 # Default values
-GPU_ID=${1:-0}
+GPU_ID=${1:-1}  # Default to GPU 1 (different from first script)
 DATA_PATH=${2:-"./preprocessing/vae_dataset.npz"}
-BASE_RESULTS_DIR=${3:-"results/experiments"}
+BASE_RESULTS_DIR=${3:-"results/experiments_gpu2"}
 DRY_RUN=${4:-false}
 
 # Create results directory
@@ -129,7 +129,7 @@ run_experiment() {
 }
 
 # ======================
-# EXPERIMENT DEFINITIONS
+# EXPERIMENT DEFINITIONS - DIFFERENT FROM SCRIPT 1
 # ======================
 
 echo "Starting experiments on GPU $GPU_ID"
@@ -138,139 +138,237 @@ echo "Base results directory: $BASE_RESULTS_DIR"
 echo "Dry run: $DRY_RUN"
 echo ""
 
-# --- LSTM VAE Experiments ---
+# --- Advanced LSTM Experiments ---
 
-# Small LSTM VAE (baseline)
+# LSTM with very deep architecture
 run_experiment \
-    "lstm_vae_small" \
-    "lstm" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    false \
-    ""
-
-# Medium LSTM VAE
-run_experiment \
-    "lstm_vae_medium" \
+    "lstm_vae_deep" \
     "lstm" \
     256 \
     32 \
-    2 \
-    32 \
+    4 \
+    16 \
     0.005 \
     false \
     ""
 
-# Large LSTM VAE (if memory allows)
+# LSTM with wide latent space
 run_experiment \
-    "lstm_vae_large" \
+    "lstm_vae_wide_latent" \
     "lstm" \
+    256 \
+    128 \
+    2 \
+    16 \
+    0.01 \
+    false \
+    ""
+
+# --- Advanced Attention Experiments ---
+
+# Attention with max pooling
+run_experiment \
+    "attention_vae_max_pool" \
+    "attention" \
+    256 \
+    32 \
+    3 \
+    24 \
+    0.005 \
+    false \
+    "--n-heads 8 --pooling max"
+
+# Large attention model
+run_experiment \
+    "attention_vae_large" \
+    "attention" \
     512 \
     64 \
     3 \
     16 \
     0.01 \
     false \
-    ""
+    "--n-heads 16 --pooling mean --d-ff 2048"
 
-# --- Attention VAE Experiments ---
-
-# Small Attention VAE
+# Attention with high dropout
 run_experiment \
-    "attention_vae_small" \
-    "attention" \
-    128 \
-    16 \
-    2 \
-    32 \
-    0.005 \
-    false \
-    "--n-heads 4 --pooling mean"
-
-# Medium Attention VAE with different pooling
-run_experiment \
-    "attention_vae_medium_cls" \
+    "attention_vae_high_dropout" \
     "attention" \
     256 \
     32 \
     2 \
-    16 \
+    24 \
     0.005 \
     false \
-    "--n-heads 8 --pooling cls"
+    "--n-heads 8 --pooling mean --dropout 0.3"
 
-# Attention VAE with causal mask
+# --- Mixed Architecture VAE-GAN ---
+
+# Medium LSTM VAE-GAN with different gamma
 run_experiment \
-    "attention_vae_causal" \
-    "attention" \
-    128 \
+    "lstm_vae_gan_gamma_0.5" \
+    "lstm" \
+    256 \
     32 \
     3 \
     24 \
     0.005 \
-    false \
-    "--n-heads 4 --use-causal-mask --pooling mean"
+    true \
+    "--gamma 0.5 --disc-num-layers 3"
 
-# --- VAE-GAN Experiments ---
-
-# Small LSTM VAE-GAN
+# LSTM VAE-GAN with high gamma
 run_experiment \
-    "lstm_vae_gan_small" \
+    "lstm_vae_gan_gamma_2.0" \
     "lstm" \
     128 \
-    16 \
+    32 \
     2 \
     32 \
-    0.001 \
+    0.005 \
     true \
-    "--disc-num-layers 2"
+    "--gamma 2.0 --disc-num-layers 2"
 
-# Attention VAE-GAN (smaller batch to fit memory)
+# Attention VAE-GAN with causal mask
 run_experiment \
-    "attention_vae_gan" \
+    "attention_vae_gan_causal" \
     "attention" \
     128 \
-    16 \
+    32 \
     2 \
     16 \
     0.005 \
     true \
-    "--n-heads 4 --pooling mean --disc-num-layers 2"
+    "--n-heads 4 --use-causal-mask --pooling mean --disc-num-layers 2"
 
-# --- Beta Ablation Study ---
+# --- Learning Rate Studies ---
 
-# Different beta values for KL weight
-for beta in 0.0001 0.001 0.01 0.1; do
-    run_experiment \
-        "lstm_vae_beta_${beta}" \
-        "lstm" \
-        128 \
-        32 \
-        2 \
-        32 \
-        $beta \
-        false \
-        ""
-done
+# High initial learning rate
+run_experiment \
+    "lstm_vae_high_lr" \
+    "lstm" \
+    256 \
+    32 \
+    2 \
+    32 \
+    0.005 \
+    false \
+    "--lr 5e-4"
 
-# --- Latent Dimension Study ---
+# Low initial learning rate
+run_experiment \
+    "lstm_vae_low_lr" \
+    "lstm" \
+    256 \
+    32 \
+    2 \
+    32 \
+    0.005 \
+    false \
+    "--lr 1e-5"
 
-# Different latent dimensions
-for latent_dim in 8 16 32 64; do
-    run_experiment \
-        "lstm_vae_latent_${latent_dim}" \
-        "lstm" \
-        128 \
-        $latent_dim \
-        2 \
-        32 \
-        0.005 \
-        false \
-        ""
-done
+# --- Batch Size Studies ---
+
+# Very small batch size
+run_experiment \
+    "lstm_vae_batch_8" \
+    "lstm" \
+    256 \
+    32 \
+    2 \
+    8 \
+    0.005 \
+    false \
+    ""
+
+# Large batch size (if memory allows)
+run_experiment \
+    "lstm_vae_batch_128" \
+    "lstm" \
+    128 \
+    16 \
+    2 \
+    128 \
+    0.005 \
+    false \
+    ""
+
+# --- Condition Dimension Studies ---
+
+# Small condition dimension
+run_experiment \
+    "lstm_vae_cond_16" \
+    "lstm" \
+    256 \
+    32 \
+    2 \
+    32 \
+    0.005 \
+    false \
+    "--condition-dim 16"
+
+# Large condition dimension
+run_experiment \
+    "lstm_vae_cond_64" \
+    "lstm" \
+    256 \
+    32 \
+    2 \
+    32 \
+    0.005 \
+    false \
+    "--condition-dim 64"
+
+# --- Scheduler Studies ---
+
+# Aggressive learning rate reduction
+run_experiment \
+    "lstm_vae_aggressive_lr" \
+    "lstm" \
+    256 \
+    32 \
+    2 \
+    32 \
+    0.005 \
+    false \
+    "--lr-patience 5 --lr-factor 0.2"
+
+# Conservative learning rate reduction
+run_experiment \
+    "lstm_vae_conservative_lr" \
+    "lstm" \
+    256 \
+    32 \
+    2 \
+    32 \
+    0.005 \
+    false \
+    "--lr-patience 20 --lr-factor 0.8"
+
+# --- Combined Studies ---
+
+# Best LSTM configuration from script 1 with modifications
+run_experiment \
+    "lstm_vae_optimized" \
+    "lstm" \
+    384 \
+    48 \
+    3 \
+    24 \
+    0.003 \
+    false \
+    "--lr 2e-4 --condition-dim 48"
+
+# Best attention configuration with modifications
+run_experiment \
+    "attention_vae_optimized" \
+    "attention" \
+    384 \
+    48 \
+    3 \
+    20 \
+    0.003 \
+    false \
+    "--n-heads 12 --pooling mean --d-ff 1536"
 
 echo "All experiments completed!"
 echo "Results saved in: $BASE_RESULTS_DIR"
