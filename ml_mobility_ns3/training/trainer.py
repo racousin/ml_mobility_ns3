@@ -68,8 +68,7 @@ class VAETrainer:
                 mode='min',
                 patience=lr_scheduler_patience,
                 factor=lr_scheduler_factor,
-                min_lr=lr_scheduler_min_lr,
-                verbose=True
+                min_lr=lr_scheduler_min_lr
             )
         else:
             self.discriminator = None
@@ -469,8 +468,7 @@ class VAETrainer:
                     mode='min',
                     patience=10,
                     factor=0.5,
-                    min_lr=1e-6,
-                    verbose=True
+                    min_lr=1e-6
                 )
                 trainer.disc_scheduler.load_state_dict(checkpoint['disc_scheduler_state_dict'])
         
