@@ -48,8 +48,7 @@ class VAETrainer:
             mode='min',
             patience=lr_scheduler_patience,
             factor=lr_scheduler_factor,
-            min_lr=lr_scheduler_min_lr,
-            verbose=True
+            min_lr=lr_scheduler_min_lr
         )
         
         # Early stopping parameters
