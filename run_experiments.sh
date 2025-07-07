@@ -1,191 +1,12 @@
-echo "=== ADVANCED VAE EXPERIMENTS ==="
-echo "Exploring advanced configurations with supported parameters only"
-echo "GPU: $GPU_ID, Data: $DATA_PATH, Results: $BASE_RESULTS_DIR"
-echo ""
-
-# ======================
-# DEEP ARCHITECTURE EXPLORATION
-# ======================
-
-echo "--- Deep Architecture Exploration ---"
-
-# Deeper models with proper regularization
-run_experiment \
-    "deep_arch_v1" \
-    128 \
-    16 \
-    4 \
-    48 \
-    0.001 \
-    8e-5 \
-    0.15 \
-    32
-
-run_experiment \
-    "deep_arch_v2" \
-    256 \
-    32 \
-    4 \
-    24 \
-    0.003 \
-    8e-5 \
-    0.2 \
-    48
-
-run_experiment \
-    "deep_arch_v3" \
-    192 \
-    24 \
-    5 \
-    32 \
-    0.002 \
-    6e-5 \
-    0.25 \
-    40
-
-# ======================
-# WIDE ARCHITECTURE EXPLORATION
-# ======================
-
-echo "--- Wide Architecture Exploration ---"
-
-# Wider models
-run_experiment \
-    "wide_arch_v1" \
-    384 \
-    16 \
-    2 \
-    32 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    32
-
-run_experiment \
-    "wide_arch_v2" \
-    512 \
-    32 \
-    2 \
-    16 \
-    0.005 \
-    8e-5 \
-    0.15 \
-    48
-
-run_experiment \
-    "wide_arch_v3" \
-    320 \
-    24 \
-    2 \
-    24 \
-    0.002 \
-    1e-4 \
-    0.12 \
-    40
-
-# ======================
-# EXTREME PARAMETER EXPLORATION
-# ======================
-
-echo "--- Extreme Parameter Exploration ---"
-
-# Very small beta values
-run_experiment \
-    "extreme_small_beta_v1" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.0001 \
-    1e-4 \
-    0.1 \
-    32
-
-run_experiment \
-    "extreme_small_beta_v2" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.0002 \
-    1e-4 \
-    0.1 \
-    32
-
-# Very high learning rates
-run_experiment \
-    "extreme_high_lr_v1" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    5e-4 \
-    0.1 \
-    32
-
-run_experiment \
-    "extreme_high_lr_v2" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    8e-4 \
-    0.15 \
-    48
-
-# Large latent dimensions
-run_experiment \
-    "extreme_large_latent_v1" \
-    256 \
-    64 \
-    2 \
-    32 \
-    0.005 \
-    1e-4 \
-    0.1 \
-    64
-
-run_experiment \
-    "extreme_large_latent_v2" \
-    384 \
-    96 \
-    2 \
-    24 \
-    0.008 \
-    8e-5 \
-    0.15 \
-    64
-
-# ======================
-# CONDITION DIMENSION EXPLORATION
-# ======================
-
-echo "--- Condition Dimension Exploration ---"
-
-# Very small condition dimensions
-run_experiment \
-    "cond_tiny_v1" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    8
-
-run_experiment \
-    "cond_tiny_v2" #!/bin/bash
-# run_advanced_vae_experiments.sh
-# Advanced VAE configurations using only supported arguments
-# Building on successful small-medium VAE configurations
+#!/bin/bash
+# run_focused_vae_experiments.sh
+# Focused experiments based on successful configurations from analysis
+# Targeting the promising small-to-medium VAE models with low beta values
 
 # Default values
-GPU_ID=${1:-1}
+GPU_ID=${1:-0}
 DATA_PATH=${2:-"./preprocessing/vae_dataset.npz"}
-BASE_RESULTS_DIR=${3:-"results/advanced_vae"}
+BASE_RESULTS_DIR=${3:-"results/focused_vae"}
 DRY_RUN=${4:-false}
 
 # Create results directory
@@ -201,21 +22,20 @@ run_experiment() {
     local beta=$6
     local learning_rate=$7
     local dropout=$8
-    local condition_dim=$9
+    local additional_args=$9
     
     local results_dir="${BASE_RESULTS_DIR}/${exp_name}"
     
     echo "=========================================="
-    echo "Running advanced experiment: $exp_name"
+    echo "Running experiment: $exp_name"
     echo "Hidden: $hidden_dim, Latent: $latent_dim, Layers: $num_layers"
     echo "Batch: $batch_size, Beta: $beta, LR: $learning_rate, Dropout: $dropout"
-    echo "Condition: $condition_dim"
     echo "=========================================="
     
     local cmd="python ./train.py \
         --data-path $DATA_PATH \
         --experiment-name $exp_name \
-        --epochs 120 \
+        --epochs 150 \
         --batch-size $batch_size \
         --lr $learning_rate \
         --beta $beta \
@@ -223,13 +43,17 @@ run_experiment() {
         --latent-dim $latent_dim \
         --num-layers $num_layers \
         --dropout $dropout \
-        --condition-dim $condition_dim \
         --device cuda \
         --gpu-id $GPU_ID \
-        --lr-patience 12 \
-        --lr-factor 0.7 \
-        --early-stopping-patience 25 \
+        --lr-patience 15 \
+        --lr-factor 0.5 \
+        --early-stopping-patience 30 \
         --gradient-clip 1.0"
+    
+    # Add additional arguments
+    if [ ! -z "$additional_args" ]; then
+        cmd="$cmd $additional_args"
+    fi
     
     echo "Command: $cmd"
     
@@ -241,7 +65,7 @@ run_experiment() {
     "command": "$cmd",
     "start_time": "$(date)",
     "gpu_id": $GPU_ID,
-    "focus": "advanced_vae",
+    "focus": "refined_vae",
     "config": {
         "hidden_dim": $hidden_dim,
         "latent_dim": $latent_dim,
@@ -249,8 +73,7 @@ run_experiment() {
         "batch_size": $batch_size,
         "beta": $beta,
         "learning_rate": $learning_rate,
-        "dropout": $dropout,
-        "condition_dim": $condition_dim
+        "dropout": $dropout
     }
 }
 EOF
@@ -258,7 +81,7 @@ EOF
         # Run the experiment
         $cmd
         
-        # Update with completion time - using simple approach instead of jq
+        # Update with completion time
         cat > "$results_dir/experiment_info.json" << EOF
 {
     "experiment_name": "$exp_name",
@@ -266,7 +89,7 @@ EOF
     "start_time": "$(date)",
     "end_time": "$(date)",
     "gpu_id": $GPU_ID,
-    "focus": "advanced_vae",
+    "focus": "refined_vae",
     "status": "completed",
     "config": {
         "hidden_dim": $hidden_dim,
@@ -275,8 +98,7 @@ EOF
         "batch_size": $batch_size,
         "beta": $beta,
         "learning_rate": $learning_rate,
-        "dropout": $dropout,
-        "condition_dim": $condition_dim
+        "dropout": $dropout
     }
 }
 EOF
@@ -287,20 +109,20 @@ EOF
     echo -e "\n"
 }
 
-echo "=== ADVANCED VAE EXPERIMENTS ==="
-echo "Exploring advanced techniques while staying with pure VAE"
+echo "=== FOCUSED VAE EXPERIMENTS ==="
+echo "Based on analysis: focusing on small-medium models with low beta"
 echo "GPU: $GPU_ID, Data: $DATA_PATH, Results: $BASE_RESULTS_DIR"
 echo ""
 
 # ======================
-# WARM-UP AND ANNEALING STRATEGIES
+# OPTIMAL SMALL MODELS (Best performer variations)
 # ======================
 
-echo "--- Beta Annealing Strategies ---"
+echo "--- Optimal Small Model Variations ---"
 
-# Beta warm-up: start from 0 and gradually increase
+# Best performer refinement - very similar to winning config
 run_experiment \
-    "beta_warmup_v1" \
+    "optimal_small_v1" \
     128 \
     16 \
     2 \
@@ -308,488 +130,277 @@ run_experiment \
     0.001 \
     1e-4 \
     0.1 \
-    "--beta-warmup-epochs 20"
+    ""
+
+# Slight variations of the best performer
+run_experiment \
+    "optimal_small_v2" \
+    128 \
+    16 \
+    2 \
+    64 \
+    0.0005 \
+    1e-4 \
+    0.1 \
+    ""
 
 run_experiment \
-    "beta_warmup_v2" \
+    "optimal_small_v3" \
+    128 \
+    20 \
+    2 \
+    64 \
+    0.001 \
+    1e-4 \
+    0.1 \
+    ""
+
+run_experiment \
+    "optimal_small_v4" \
+    144 \
+    16 \
+    2 \
+    64 \
+    0.001 \
+    1e-4 \
+    0.1 \
+    ""
+
+# ======================
+# REFINED MEDIUM MODELS
+# ======================
+
+echo "--- Refined Medium Models ---"
+
+# Medium model with lower beta (second best performer direction)
+run_experiment \
+    "optimal_medium_v1" \
     256 \
     32 \
+    2 \
+    32 \
+    0.002 \
+    1e-4 \
+    0.1 \
+    ""
+
+run_experiment \
+    "optimal_medium_v2" \
+    256 \
+    28 \
     2 \
     32 \
     0.003 \
     1e-4 \
     0.1 \
-    "--beta-warmup-epochs 30"
+    ""
 
-# Cyclical beta scheduling
 run_experiment \
-    "beta_cyclical" \
-    128 \
-    16 \
+    "optimal_medium_v3" \
+    240 \
+    32 \
     2 \
-    64 \
-    0.001 \
+    32 \
+    0.002 \
     1e-4 \
     0.1 \
-    "--beta-cyclical --beta-cycle-length 10"
+    ""
 
 # ======================
-# ADVANCED OPTIMIZATION
+# BETA FINE-TUNING (Critical parameter)
 # ======================
 
-echo "--- Advanced Optimization Techniques ---"
+echo "--- Beta Fine-tuning Around Optimal Values ---"
 
-# Different optimizers
-run_experiment \
-    "opt_adamw" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--optimizer adamw --weight-decay 1e-4"
-
-run_experiment \
-    "opt_radam" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--optimizer radam"
-
-# Cosine annealing scheduler
-run_experiment \
-    "scheduler_cosine" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    2e-4 \
-    0.1 \
-    "--scheduler cosine --cosine-min-lr 1e-6"
-
-# One cycle learning rate
-run_experiment \
-    "scheduler_onecycle" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--scheduler onecycle --max-lr 5e-4"
+# Very fine beta exploration around best values
+for beta in 0.0005 0.0008 0.0012 0.0015 0.002 0.003; do
+    beta_name=$(echo $beta | sed 's/\./_/g')
+    run_experiment \
+        "beta_fine_${beta_name}" \
+        128 \
+        16 \
+        2 \
+        64 \
+        $beta \
+        1e-4 \
+        0.1 \
+        ""
+done
 
 # ======================
-# ARCHITECTURAL IMPROVEMENTS
+# ARCHITECTURE REFINEMENTS
 # ======================
 
-echo "--- Architectural Improvements ---"
+echo "--- Architecture Refinements ---"
 
-# Residual connections in LSTM
+# Slightly deeper but not too deep
 run_experiment \
-    "arch_residual_small" \
+    "arch_deep_small" \
     128 \
     16 \
     3 \
-    64 \
+    48 \
     0.001 \
-    1e-4 \
-    0.1 \
-    "--use-residual-connections"
-
-run_experiment \
-    "arch_residual_medium" \
-    256 \
-    32 \
-    3 \
-    32 \
-    0.003 \
     1e-4 \
     0.15 \
-    "--use-residual-connections"
+    ""
 
-# Layer normalization
+# Wider but shallow
 run_experiment \
-    "arch_layernorm" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--use-layer-norm"
-
-# Bidirectional encoding with unidirectional decoding
-run_experiment \
-    "arch_bidirectional" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--bidirectional-encoder"
-
-# Skip connections between encoder and decoder
-run_experiment \
-    "arch_skip_connections" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--use-skip-connections"
-
-# ======================
-# ADVANCED REGULARIZATION
-# ======================
-
-echo "--- Advanced Regularization ---"
-
-# Spectral normalization
-run_experiment \
-    "reg_spectral_norm" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--spectral-normalization"
-
-# Dropout variations
-run_experiment \
-    "reg_variational_dropout" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--variational-dropout"
-
-# Weight regularization
-run_experiment \
-    "reg_weight_decay" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--weight-decay 1e-3"
-
-# Batch normalization
-run_experiment \
-    "reg_batch_norm" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--use-batch-norm"
-
-# ======================
-# CONDITIONING IMPROVEMENTS
-# ======================
-
-echo "--- Advanced Conditioning Strategies ---"
-
-# Learned positional embeddings for sequence position
-run_experiment \
-    "cond_positional" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--use-positional-encoding"
-
-# Multiple condition injection points
-run_experiment \
-    "cond_multi_injection" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--multi-condition-injection"
-
-# Hierarchical conditioning
-run_experiment \
-    "cond_hierarchical" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--hierarchical-conditioning --condition-dim 48"
-
-# Attention-based condition fusion
-run_experiment \
-    "cond_attention_fusion" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--attention-condition-fusion"
-
-# ======================
-# LOSS FUNCTION VARIATIONS
-# ======================
-
-echo "--- Advanced Loss Functions ---"
-
-# Focal loss for reconstruction
-run_experiment \
-    "loss_focal" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--focal-loss --focal-alpha 0.25 --focal-gamma 2.0"
-
-# Huber loss (robust to outliers)
-run_experiment \
-    "loss_huber" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--huber-loss --huber-delta 1.0"
-
-# Perceptual loss using feature space
-run_experiment \
-    "loss_perceptual" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--perceptual-loss"
-
-# Combined reconstruction losses
-run_experiment \
-    "loss_combined" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--combined-recon-loss --l1-weight 0.3 --l2-weight 0.7"
-
-# ======================
-# SEQUENCE MODELING IMPROVEMENTS
-# ======================
-
-echo "--- Sequence Modeling Improvements ---"
-
-# Transformer-LSTM hybrid
-run_experiment \
-    "seq_transformer_hybrid" \
-    256 \
-    32 \
-    2 \
+    "arch_wide_shallow" \
+    192 \
     24 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--transformer-lstm-hybrid --n-heads 4"
-
-# Temporal convolutions
-run_experiment \
-    "seq_temporal_conv" \
-    128 \
-    16 \
     2 \
-    64 \
-    0.001 \
+    48 \
+    0.0015 \
     1e-4 \
     0.1 \
-    "--temporal-convolutions --conv-channels 64"
+    ""
 
-# Multi-scale temporal modeling
+# Single layer with more capacity
 run_experiment \
-    "seq_multiscale" \
+    "arch_single_wide" \
     256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--multiscale-temporal --scales 1,2,4"
-
-# ======================
-# TRAINING STRATEGIES
-# ======================
-
-echo "--- Advanced Training Strategies ---"
-
-# Progressive training (start with shorter sequences)
-run_experiment \
-    "train_progressive" \
-    128 \
-    16 \
-    2 \
+    20 \
+    1 \
     64 \
     0.001 \
     1e-4 \
-    0.1 \
-    "--progressive-training --start-length 500 --length-increase-epochs 15"
-
-# Curriculum learning (easy to hard samples)
-run_experiment \
-    "train_curriculum" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--curriculum-learning --difficulty-metric speed_variance"
-
-# Self-paced learning
-run_experiment \
-    "train_selfpaced" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--self-paced-learning --pace-increase-rate 0.1"
-
-# Mixed precision training
-run_experiment \
-    "train_mixed_precision" \
-    256 \
-    32 \
-    2 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.1 \
-    "--mixed-precision"
+    0.05 \
+    ""
 
 # ======================
-# ENSEMBLE APPROACHES
+# LEARNING RATE OPTIMIZATION
 # ======================
 
-echo "--- Ensemble Approaches ---"
+echo "--- Learning Rate Optimization ---"
 
-# Multi-head VAE (multiple decoders)
-run_experiment \
-    "ensemble_multihead" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--multi-head-decoder --num-heads 3"
-
-# Bootstrap aggregating
-run_experiment \
-    "ensemble_bootstrap" \
-    128 \
-    16 \
-    2 \
-    64 \
-    0.001 \
-    1e-4 \
-    0.1 \
-    "--bootstrap-training --bootstrap-ratio 0.8"
+# Different learning rates with best config
+for lr in 5e-5 8e-5 1.5e-4 2e-4; do
+    lr_name=$(echo $lr | sed 's/e-/_e_/g' | sed 's/\./_/g')
+    run_experiment \
+        "lr_opt_${lr_name}" \
+        128 \
+        16 \
+        2 \
+        64 \
+        0.001 \
+        $lr \
+        0.1 \
+        ""
+done
 
 # ======================
-# HYBRID BEST ADVANCED
+# BATCH SIZE OPTIMIZATION
 # ======================
 
-echo "--- Hybrid Advanced Configurations ---"
+echo "--- Batch Size Optimization ---"
 
-# Combine multiple advanced techniques
+# Test different batch sizes with optimal config
+for batch_size in 48 80 96 128; do
+    run_experiment \
+        "batch_opt_${batch_size}" \
+        128 \
+        16 \
+        2 \
+        $batch_size \
+        0.001 \
+        1e-4 \
+        0.1 \
+        ""
+done
+
+# ======================
+# REGULARIZATION REFINEMENTS
+# ======================
+
+echo "--- Regularization Refinements ---"
+
+# Different dropout rates
+for dropout in 0.05 0.08 0.12 0.15; do
+    dropout_name=$(echo $dropout | sed 's/\./_/g')
+    run_experiment \
+        "dropout_opt_${dropout_name}" \
+        128 \
+        16 \
+        2 \
+        64 \
+        0.001 \
+        1e-4 \
+        $dropout \
+        ""
+done
+
+# ======================
+# CONDITION EMBEDDING OPTIMIZATION
+# ======================
+
+echo "--- Condition Embedding Optimization ---"
+
+# Different condition dimensions
+for cond_dim in 16 24 40 48; do
+    run_experiment \
+        "cond_opt_${cond_dim}" \
+        128 \
+        16 \
+        2 \
+        64 \
+        0.001 \
+        1e-4 \
+        0.1 \
+        "--condition-dim $cond_dim"
+done
+
+# ======================
+# HYBRID CONFIGURATIONS
+# ======================
+
+echo "--- Hybrid Best Configurations ---"
+
+# Combination of best settings from different aspects
 run_experiment \
-    "advanced_hybrid_1" \
+    "hybrid_optimal_1" \
     144 \
     20 \
     2 \
     64 \
     0.0008 \
-    1e-4 \
+    8e-5 \
     0.08 \
-    "--use-layer-norm --bidirectional-encoder --attention-condition-fusion --condition-dim 24"
+    "--condition-dim 24"
 
 run_experiment \
-    "advanced_hybrid_2" \
-    256 \
-    32 \
-    3 \
-    32 \
-    0.003 \
-    1e-4 \
-    0.12 \
-    "--use-residual-connections --multi-condition-injection --huber-loss --optimizer adamw"
-
-run_experiment \
-    "advanced_hybrid_3" \
+    "hybrid_optimal_2" \
     160 \
-    24 \
+    18 \
     2 \
     48 \
     0.0012 \
     1.2e-4 \
-    0.1 \
-    "--spectral-normalization --beta-warmup-epochs 25 --scheduler cosine --use-positional-encoding"
+    0.12 \
+    "--condition-dim 20"
 
-echo "All advanced VAE experiments completed!"
+run_experiment \
+    "hybrid_optimal_3" \
+    136 \
+    22 \
+    2 \
+    56 \
+    0.0006 \
+    9e-5 \
+    0.09 \
+    "--condition-dim 28"
+
+echo "All focused VAE experiments completed!"
 echo "Results saved in: $BASE_RESULTS_DIR"
 
 # Generate summary
 if [ "$DRY_RUN" = false ]; then
-    echo "Generating advanced experiments summary..."
+    echo "Generating focused experiments summary..."
     python - << EOF
 import json
 import pandas as pd
 from pathlib import Path
-import numpy as np
 
 results_dir = Path("$BASE_RESULTS_DIR")
 experiments = []
@@ -805,11 +416,12 @@ for exp_dir in results_dir.iterdir():
             
             exp_data = {
                 'experiment': info.get('experiment_name', ''),
-                'category': info.get('experiment_name', '').split('_')[0] + '_' + info.get('experiment_name', '').split('_')[1] if '_' in info.get('experiment_name', '') else 'other',
                 'hidden_dim': info.get('config', {}).get('hidden_dim', ''),
                 'latent_dim': info.get('config', {}).get('latent_dim', ''),
                 'beta': info.get('config', {}).get('beta', ''),
-                'techniques': info.get('config', {}).get('additional_args', ''),
+                'learning_rate': info.get('config', {}).get('learning_rate', ''),
+                'dropout': info.get('config', {}).get('dropout', ''),
+                'batch_size': info.get('config', {}).get('batch_size', ''),
             }
             
             if history_file.exists():
@@ -819,7 +431,6 @@ for exp_dir in results_dir.iterdir():
                         exp_data['best_val_loss'] = min(history['val_loss'])
                         exp_data['final_val_loss'] = history['val_loss'][-1]
                         exp_data['num_epochs'] = len(history['val_loss'])
-                        exp_data['convergence_speed'] = np.argmin(history['val_loss']) + 1  # Epoch of best performance
                         if history.get('val_speed_mae'):
                             exp_data['best_speed_mae'] = min(history['val_speed_mae'])
             
@@ -827,22 +438,14 @@ for exp_dir in results_dir.iterdir():
 
 if experiments:
     df = pd.DataFrame(experiments)
-    df.to_csv(results_dir / "advanced_experiments_summary.csv", index=False)
+    df.to_csv(results_dir / "focused_experiments_summary.csv", index=False)
     
-    print("\\nExperiment categories and their performance:")
+    # Find top performers
     if 'best_val_loss' in df.columns:
-        category_performance = df.groupby('category')['best_val_loss'].agg(['count', 'mean', 'min']).round(4)
-        print(category_performance.to_string())
-        
-        print("\\nTop 5 experiments by validation loss:")
         top_5 = df.nsmallest(5, 'best_val_loss')
-        print(top_5[['experiment', 'best_val_loss', 'category', 'convergence_speed']].to_string(index=False))
-        
-        print("\\nFastest converging experiments:")
-        if 'convergence_speed' in df.columns:
-            fastest = df.nsmallest(5, 'convergence_speed')
-            print(fastest[['experiment', 'convergence_speed', 'best_val_loss', 'category']].to_string(index=False))
+        print("\\nTop 5 experiments by validation loss:")
+        print(top_5[['experiment', 'best_val_loss', 'hidden_dim', 'latent_dim', 'beta']].to_string(index=False))
 
-print(f"\\nAdvanced experiments summary saved to: {results_dir / 'advanced_experiments_summary.csv'}")
+print(f"\\nSummary saved to: {results_dir / 'focused_experiments_summary.csv'}")
 EOF
 fi
