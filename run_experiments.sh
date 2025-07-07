@@ -1,6 +1,185 @@
-#!/bin/bash
+echo "=== ADVANCED VAE EXPERIMENTS ==="
+echo "Exploring advanced configurations with supported parameters only"
+echo "GPU: $GPU_ID, Data: $DATA_PATH, Results: $BASE_RESULTS_DIR"
+echo ""
+
+# ======================
+# DEEP ARCHITECTURE EXPLORATION
+# ======================
+
+echo "--- Deep Architecture Exploration ---"
+
+# Deeper models with proper regularization
+run_experiment \
+    "deep_arch_v1" \
+    128 \
+    16 \
+    4 \
+    48 \
+    0.001 \
+    8e-5 \
+    0.15 \
+    32
+
+run_experiment \
+    "deep_arch_v2" \
+    256 \
+    32 \
+    4 \
+    24 \
+    0.003 \
+    8e-5 \
+    0.2 \
+    48
+
+run_experiment \
+    "deep_arch_v3" \
+    192 \
+    24 \
+    5 \
+    32 \
+    0.002 \
+    6e-5 \
+    0.25 \
+    40
+
+# ======================
+# WIDE ARCHITECTURE EXPLORATION
+# ======================
+
+echo "--- Wide Architecture Exploration ---"
+
+# Wider models
+run_experiment \
+    "wide_arch_v1" \
+    384 \
+    16 \
+    2 \
+    32 \
+    0.001 \
+    1e-4 \
+    0.1 \
+    32
+
+run_experiment \
+    "wide_arch_v2" \
+    512 \
+    32 \
+    2 \
+    16 \
+    0.005 \
+    8e-5 \
+    0.15 \
+    48
+
+run_experiment \
+    "wide_arch_v3" \
+    320 \
+    24 \
+    2 \
+    24 \
+    0.002 \
+    1e-4 \
+    0.12 \
+    40
+
+# ======================
+# EXTREME PARAMETER EXPLORATION
+# ======================
+
+echo "--- Extreme Parameter Exploration ---"
+
+# Very small beta values
+run_experiment \
+    "extreme_small_beta_v1" \
+    128 \
+    16 \
+    2 \
+    64 \
+    0.0001 \
+    1e-4 \
+    0.1 \
+    32
+
+run_experiment \
+    "extreme_small_beta_v2" \
+    256 \
+    32 \
+    2 \
+    32 \
+    0.0002 \
+    1e-4 \
+    0.1 \
+    32
+
+# Very high learning rates
+run_experiment \
+    "extreme_high_lr_v1" \
+    128 \
+    16 \
+    2 \
+    64 \
+    0.001 \
+    5e-4 \
+    0.1 \
+    32
+
+run_experiment \
+    "extreme_high_lr_v2" \
+    256 \
+    32 \
+    2 \
+    32 \
+    0.003 \
+    8e-4 \
+    0.15 \
+    48
+
+# Large latent dimensions
+run_experiment \
+    "extreme_large_latent_v1" \
+    256 \
+    64 \
+    2 \
+    32 \
+    0.005 \
+    1e-4 \
+    0.1 \
+    64
+
+run_experiment \
+    "extreme_large_latent_v2" \
+    384 \
+    96 \
+    2 \
+    24 \
+    0.008 \
+    8e-5 \
+    0.15 \
+    64
+
+# ======================
+# CONDITION DIMENSION EXPLORATION
+# ======================
+
+echo "--- Condition Dimension Exploration ---"
+
+# Very small condition dimensions
+run_experiment \
+    "cond_tiny_v1" \
+    128 \
+    16 \
+    2 \
+    64 \
+    0.001 \
+    1e-4 \
+    0.1 \
+    8
+
+run_experiment \
+    "cond_tiny_v2" #!/bin/bash
 # run_advanced_vae_experiments.sh
-# Advanced VAE techniques and architectural improvements
+# Advanced VAE configurations using only supported arguments
 # Building on successful small-medium VAE configurations
 
 # Default values
@@ -22,7 +201,7 @@ run_experiment() {
     local beta=$6
     local learning_rate=$7
     local dropout=$8
-    local additional_args=$9
+    local condition_dim=$9
     
     local results_dir="${BASE_RESULTS_DIR}/${exp_name}"
     
@@ -30,7 +209,7 @@ run_experiment() {
     echo "Running advanced experiment: $exp_name"
     echo "Hidden: $hidden_dim, Latent: $latent_dim, Layers: $num_layers"
     echo "Batch: $batch_size, Beta: $beta, LR: $learning_rate, Dropout: $dropout"
-    echo "Additional: $additional_args"
+    echo "Condition: $condition_dim"
     echo "=========================================="
     
     local cmd="python ./train.py \
@@ -44,6 +223,7 @@ run_experiment() {
         --latent-dim $latent_dim \
         --num-layers $num_layers \
         --dropout $dropout \
+        --condition-dim $condition_dim \
         --device cuda \
         --gpu-id $GPU_ID \
         --lr-patience 12 \
@@ -51,38 +231,55 @@ run_experiment() {
         --early-stopping-patience 25 \
         --gradient-clip 1.0"
     
-    # Add additional arguments
-    if [ ! -z "$additional_args" ]; then
-        cmd="$cmd $additional_args"
-    fi
-    
     echo "Command: $cmd"
     
     if [ "$DRY_RUN" = false ]; then
         mkdir -p $results_dir
-        echo "{
-    \"experiment_name\": \"$exp_name\",
-    \"command\": \"$cmd\",
-    \"start_time\": \"$(date)\",
-    \"gpu_id\": $GPU_ID,
-    \"focus\": \"advanced_vae\",
-    \"config\": {
-        \"hidden_dim\": $hidden_dim,
-        \"latent_dim\": $latent_dim,
-        \"num_layers\": $num_layers,
-        \"batch_size\": $batch_size,
-        \"beta\": $beta,
-        \"learning_rate\": $learning_rate,
-        \"dropout\": $dropout,
-        \"additional_args\": \"$additional_args\"
+        cat > "$results_dir/experiment_info.json" << EOF
+{
+    "experiment_name": "$exp_name",
+    "command": "$cmd",
+    "start_time": "$(date)",
+    "gpu_id": $GPU_ID,
+    "focus": "advanced_vae",
+    "config": {
+        "hidden_dim": $hidden_dim,
+        "latent_dim": $latent_dim,
+        "num_layers": $num_layers,
+        "batch_size": $batch_size,
+        "beta": $beta,
+        "learning_rate": $learning_rate,
+        "dropout": $dropout,
+        "condition_dim": $condition_dim
     }
-}" > "$results_dir/experiment_info.json"
+}
+EOF
         
         # Run the experiment
         $cmd
         
-        # Update with completion time
-        jq '. + {"end_time": "'$(date)'", "status": "completed"}' "$results_dir/experiment_info.json" > "$results_dir/experiment_info_tmp.json" && mv "$results_dir/experiment_info_tmp.json" "$results_dir/experiment_info.json"
+        # Update with completion time - using simple approach instead of jq
+        cat > "$results_dir/experiment_info.json" << EOF
+{
+    "experiment_name": "$exp_name",
+    "command": "$cmd",
+    "start_time": "$(date)",
+    "end_time": "$(date)",
+    "gpu_id": $GPU_ID,
+    "focus": "advanced_vae",
+    "status": "completed",
+    "config": {
+        "hidden_dim": $hidden_dim,
+        "latent_dim": $latent_dim,
+        "num_layers": $num_layers,
+        "batch_size": $batch_size,
+        "beta": $beta,
+        "learning_rate": $learning_rate,
+        "dropout": $dropout,
+        "condition_dim": $condition_dim
+    }
+}
+EOF
     else
         echo "DRY RUN - Skipping execution"
     fi
