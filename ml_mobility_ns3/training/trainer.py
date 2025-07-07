@@ -4,18 +4,19 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from tqdm import tqdm
 import logging
 import json
+import numpy as np
 
-from ..models.vae import ConditionalTrajectoryVAE, TrajectoryDiscriminator, masked_vae_loss, vae_gan_loss
+from ..models.vae import ConditionalTrajectoryVAE, masked_vae_loss, compute_trajectory_metrics
 
 logger = logging.getLogger(__name__)
 
 
 class VAETrainer:
-    """Trainer for the Conditional Trajectory VAE with optional GAN training."""
+    """Trainer for the Conditional Trajectory VAE."""
 
     def __init__(
         self,
@@ -23,24 +24,18 @@ class VAETrainer:
         device: str,
         learning_rate: float = 1e-4,
         beta: float = 1.0,
-        use_gan: bool = False,
-        discriminator: Optional[TrajectoryDiscriminator] = None,
-        disc_lr: float = 1e-4,
-        gamma: float = 1.0,
-        disc_update_freq: int = 1,
         lr_scheduler_patience: int = 10,
         lr_scheduler_factor: float = 0.5,
         lr_scheduler_min_lr: float = 1e-6,
         early_stopping_patience: int = 20,
         early_stopping_min_delta: float = 1e-4,
+        gradient_clip_val: float = 1.0,
     ):
         self.model = model.to(device)
         self.device = device
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-5)
         self.beta = beta
-        self.use_gan = use_gan
-        self.gamma = gamma
-        self.disc_update_freq = disc_update_freq
+        self.gradient_clip_val = gradient_clip_val
         
         # Learning rate scheduler
         self.scheduler = ReduceLROnPlateau(
@@ -48,7 +43,8 @@ class VAETrainer:
             mode='min',
             patience=lr_scheduler_patience,
             factor=lr_scheduler_factor,
-            min_lr=lr_scheduler_min_lr
+            min_lr=lr_scheduler_min_lr,
+            verbose=True
         )
         
         # Early stopping parameters
@@ -57,67 +53,56 @@ class VAETrainer:
         self.early_stopping_counter = 0
         self.best_val_loss = float('inf')
         
-        # GAN-specific components
-        if self.use_gan:
-            if discriminator is None:
-                raise ValueError("Discriminator must be provided when use_gan=True")
-            self.discriminator = discriminator.to(device)
-            self.disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=disc_lr)
-            self.disc_scheduler = ReduceLROnPlateau(
-                self.disc_optimizer,
-                mode='min',
-                patience=lr_scheduler_patience,
-                factor=lr_scheduler_factor,
-                min_lr=lr_scheduler_min_lr
-            )
-        else:
-            self.discriminator = None
-            self.disc_optimizer = None
-            self.disc_scheduler = None
-        
+        # Training history
         self.history = {
             'train_loss': [], 'val_loss': [], 
             'train_recon_loss': [], 'val_recon_loss': [],
             'train_kl_loss': [], 'val_kl_loss': [],
+            'train_speed_mae': [], 'val_speed_mae': [],
+            'train_total_distance_mae': [], 'val_total_distance_mae': [],
+            'train_bird_distance_mae': [], 'val_bird_distance_mae': [],
             'learning_rates': [],
         }
-        
-        if self.use_gan:
-            self.history.update({
-                'train_gen_loss': [], 'val_gen_loss': [],
-                'train_disc_loss': [], 'val_disc_loss': [],
-                'train_disc_real': [], 'val_disc_real': [],
-                'train_disc_fake': [], 'val_disc_fake': [],
-                'train_disc_recon': [], 'val_disc_recon': [],
-                'disc_learning_rates': [],
-            })
         
         self.global_step = 0
 
     def train_epoch(self, dataloader: DataLoader) -> Dict[str, float]:
         """Train for one epoch."""
         self.model.train()
-        if self.use_gan:
-            self.discriminator.train()
-            
+        
         epoch_metrics = {
             'loss': 0, 'recon_loss': 0, 'kl_loss': 0,
-            'gen_loss': 0, 'disc_loss': 0,
-            'disc_real': 0, 'disc_fake': 0, 'disc_recon': 0,
+            'speed_mae': 0, 'total_distance_mae': 0, 'bird_distance_mae': 0,
         }
         
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="Training")):
             x, mask, mode, length = [b.to(self.device) for b in batch]
             
-            if self.use_gan:
-                metrics = self._train_step_gan(x, mask, mode, length, batch_idx)
-            else:
-                metrics = self._train_step_vae(x, mask, mode, length)
+            # Forward pass
+            recon, mu, logvar = self.model(x, mode, length, mask)
+            loss, loss_metrics = masked_vae_loss(recon, x, mu, logvar, mask, self.beta)
+            
+            # Compute trajectory metrics
+            traj_metrics = compute_trajectory_metrics(recon, x, mask)
+            
+            # Backward pass
+            self.optimizer.zero_grad()
+            loss.backward()
+            
+            # Gradient clipping
+            if self.gradient_clip_val > 0:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip_val)
+            
+            self.optimizer.step()
             
             # Accumulate metrics
-            for key in metrics:
+            for key in loss_metrics:
                 if key in epoch_metrics:
-                    epoch_metrics[key] += metrics[key]
+                    epoch_metrics[key] += loss_metrics[key]
+            
+            for key in traj_metrics:
+                if key in epoch_metrics:
+                    epoch_metrics[key] += traj_metrics[key]
             
             self.global_step += 1
 
@@ -127,118 +112,35 @@ class VAETrainer:
             epoch_metrics[key] /= n_batches
             
         return epoch_metrics
-    
-    def _train_step_vae(self, x, mask, mode, length):
-        """Standard VAE training step."""
-        # Forward pass
-        recon, mu, logvar = self.model(x, mode, length, mask)
-        loss, metrics = masked_vae_loss(recon, x, mu, logvar, mask, self.beta)
-
-        # Backward pass
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        
-        return metrics
-    
-    def _train_step_gan(self, x, mask, mode, length, batch_idx):
-        """VAE-GAN training step."""
-        batch_size = x.size(0)
-        
-        # =================
-        # Train Discriminator
-        # =================
-        if batch_idx % self.disc_update_freq == 0:
-            # Generate fake samples
-            with torch.no_grad():
-                # Sample from prior
-                z = torch.randn(batch_size, self.model.latent_dim).to(self.device)
-                conditions = self.model.get_conditions(mode, length)
-                fake = self.model.decode(z, conditions)
-                
-                # Get reconstructions
-                recon, mu, logvar = self.model(x, mode, length, mask)
-            
-            # Discriminator forward pass
-            disc_real_logits = self.discriminator(x, mode, length, mask)
-            disc_fake_logits = self.discriminator(fake.detach(), mode, length, mask)
-            disc_recon_logits = self.discriminator(recon.detach(), mode, length, mask)
-            
-            # Calculate discriminator loss
-            disc_loss_real = torch.nn.functional.binary_cross_entropy_with_logits(
-                disc_real_logits, torch.ones_like(disc_real_logits)
-            )
-            disc_loss_fake = torch.nn.functional.binary_cross_entropy_with_logits(
-                disc_fake_logits, torch.zeros_like(disc_fake_logits)
-            )
-            disc_loss_recon = torch.nn.functional.binary_cross_entropy_with_logits(
-                disc_recon_logits, torch.zeros_like(disc_recon_logits)
-            )
-            disc_loss = disc_loss_real + disc_loss_fake + disc_loss_recon
-            
-            # Update discriminator
-            self.disc_optimizer.zero_grad()
-            disc_loss.backward()
-            self.disc_optimizer.step()
-        
-        # =================
-        # Train Generator (VAE)
-        # =================
-        # Generate new samples for generator training
-        z = torch.randn(batch_size, self.model.latent_dim).to(self.device)
-        conditions = self.model.get_conditions(mode, length)
-        fake = self.model.decode(z, conditions)
-        
-        # Get reconstructions
-        recon, mu, logvar = self.model(x, mode, length, mask)
-        
-        # Discriminator predictions for generator loss
-        disc_fake_logits = self.discriminator(fake, mode, length, mask)
-        disc_recon_logits = self.discriminator(recon, mode, length, mask)
-        
-        # For metrics only (not used in backprop)
-        with torch.no_grad():
-            disc_real_logits = self.discriminator(x, mode, length, mask)
-        
-        # Calculate VAE-GAN loss
-        losses, metrics = vae_gan_loss(
-            recon, x, mu, logvar, mask,
-            disc_real_logits, disc_fake_logits, disc_recon_logits,
-            self.beta, self.gamma
-        )
-        
-        # Update generator (VAE)
-        self.optimizer.zero_grad()
-        losses['gen_total'].backward()
-        self.optimizer.step()
-        
-        return metrics
 
     @torch.no_grad()
     def evaluate(self, dataloader: DataLoader) -> Dict[str, float]:
         """Evaluate on a validation set."""
         self.model.eval()
-        if self.use_gan:
-            self.discriminator.eval()
-            
+        
         epoch_metrics = {
             'loss': 0, 'recon_loss': 0, 'kl_loss': 0,
-            'gen_loss': 0, 'disc_loss': 0,
-            'disc_real': 0, 'disc_fake': 0, 'disc_recon': 0,
+            'speed_mae': 0, 'total_distance_mae': 0, 'bird_distance_mae': 0,
         }
         
         for batch in tqdm(dataloader, desc="Evaluating"):
             x, mask, mode, length = [b.to(self.device) for b in batch]
             
-            if self.use_gan:
-                metrics = self._eval_step_gan(x, mask, mode, length)
-            else:
-                metrics = self._eval_step_vae(x, mask, mode, length)
+            # Forward pass
+            recon, mu, logvar = self.model(x, mode, length, mask)
+            loss, loss_metrics = masked_vae_loss(recon, x, mu, logvar, mask, self.beta)
+            
+            # Compute trajectory metrics
+            traj_metrics = compute_trajectory_metrics(recon, x, mask)
             
             # Accumulate metrics
-            for key in metrics:
+            for key in loss_metrics:
                 if key in epoch_metrics:
-                    epoch_metrics[key] += metrics[key]
+                    epoch_metrics[key] += loss_metrics[key]
+            
+            for key in traj_metrics:
+                if key in epoch_metrics:
+                    epoch_metrics[key] += traj_metrics[key]
 
         # Average metrics
         n_batches = len(dataloader)
@@ -246,38 +148,68 @@ class VAETrainer:
             epoch_metrics[key] /= n_batches
             
         return epoch_metrics
-    
-    def _eval_step_vae(self, x, mask, mode, length):
-        """Standard VAE evaluation step."""
-        recon, mu, logvar = self.model(x, mode, length, mask)
-        loss, metrics = masked_vae_loss(recon, x, mu, logvar, mask, self.beta)
-        return metrics
-    
-    def _eval_step_gan(self, x, mask, mode, length):
-        """VAE-GAN evaluation step."""
-        batch_size = x.size(0)
+
+    @torch.no_grad()
+    def evaluate_generation(self, dataloader: DataLoader, n_samples_per_mode: int = 100) -> Dict[str, float]:
+        """Evaluate generation quality by generating samples for each transport mode."""
+        self.model.eval()
         
-        # Generate samples
-        z = torch.randn(batch_size, self.model.latent_dim).to(self.device)
-        conditions = self.model.get_conditions(mode, length)
-        fake = self.model.decode(z, conditions)
+        # Get unique transport modes from the dataloader
+        all_modes = []
+        all_lengths = []
+        for batch in dataloader:
+            _, _, mode, length = batch
+            all_modes.extend(mode.tolist())
+            all_lengths.extend(length.tolist())
         
-        # Get reconstructions
-        recon, mu, logvar = self.model(x, mode, length, mask)
+        unique_modes = list(set(all_modes))
+        mode_avg_lengths = {}
+        for mode in unique_modes:
+            mode_lengths = [length for m, length in zip(all_modes, all_lengths) if m == mode]
+            mode_avg_lengths[mode] = int(np.mean(mode_lengths))
         
-        # Discriminator predictions
-        disc_real_logits = self.discriminator(x, mode, length, mask)
-        disc_fake_logits = self.discriminator(fake, mode, length, mask)
-        disc_recon_logits = self.discriminator(recon, mode, length, mask)
+        generation_metrics = {
+            'gen_total_distance_mae': 0,
+            'gen_bird_distance_mae': 0,
+            'gen_speed_mae': 0,
+        }
         
-        # Calculate losses
-        _, metrics = vae_gan_loss(
-            recon, x, mu, logvar, mask,
-            disc_real_logits, disc_fake_logits, disc_recon_logits,
-            self.beta, self.gamma
-        )
+        # Generate samples for each mode
+        for mode in unique_modes:
+            avg_length = mode_avg_lengths[mode]
+            
+            # Create mode and length tensors
+            modes = torch.full((n_samples_per_mode,), mode, dtype=torch.long, device=self.device)
+            lengths = torch.full((n_samples_per_mode,), avg_length, dtype=torch.long, device=self.device)
+            
+            # Generate trajectories
+            generated = self.model.generate(modes, lengths, device=self.device)
+            
+            # Create fake target (we can't evaluate against real targets, so we compute internal consistency)
+            # Instead, let's compute some basic trajectory statistics
+            generated_np = generated.cpu().numpy()
+            
+            # Compute basic trajectory statistics
+            for i in range(len(generated_np)):
+                traj = generated_np[i, :avg_length, :]
+                if len(traj) > 1:
+                    # Total distance
+                    lat_diff = np.diff(traj[:, 0])
+                    lon_diff = np.diff(traj[:, 1])
+                    total_dist = np.sum(np.sqrt(lat_diff**2 + lon_diff**2)) * 111
+                    
+                    # Bird distance
+                    bird_dist = np.sqrt((traj[-1, 0] - traj[0, 0])**2 + (traj[-1, 1] - traj[0, 1])**2) * 111
+                    
+                    # Average speed
+                    avg_speed = np.mean(traj[:, 2])
+                    
+                    # Store for later analysis (simplified here)
+                    generation_metrics['gen_total_distance_mae'] += total_dist / (n_samples_per_mode * len(unique_modes))
+                    generation_metrics['gen_bird_distance_mae'] += bird_dist / (n_samples_per_mode * len(unique_modes))
+                    generation_metrics['gen_speed_mae'] += avg_speed / (n_samples_per_mode * len(unique_modes))
         
-        return metrics
+        return generation_metrics
 
     def fit(
         self,
@@ -295,63 +227,39 @@ class VAETrainer:
             self.early_stopping_counter = 0
 
         for epoch in range(epochs):
+            logger.info(f"Epoch {epoch+1}/{epochs}")
+            
+            # Training
             train_metrics = self.train_epoch(train_loader)
+            
+            # Validation
             val_metrics = self.evaluate(val_loader)
-
+            
             # Update history
-            for key in ['loss', 'recon_loss', 'kl_loss']:
+            for key in ['loss', 'recon_loss', 'kl_loss', 'speed_mae', 'total_distance_mae', 'bird_distance_mae']:
                 if key in train_metrics:
                     self.history[f'train_{key}'].append(train_metrics[key])
                     self.history[f'val_{key}'].append(val_metrics[key])
-            
-            if self.use_gan:
-                for key in ['gen_loss', 'disc_loss', 'disc_real', 'disc_fake', 'disc_recon']:
-                    if key in train_metrics:
-                        self.history[f'train_{key}'].append(train_metrics[key])
-                        self.history[f'val_{key}'].append(val_metrics[key])
 
             # Track learning rates
             current_lr = self.optimizer.param_groups[0]['lr']
             self.history['learning_rates'].append(current_lr)
-            if self.use_gan:
-                disc_lr = self.disc_optimizer.param_groups[0]['lr']
-                self.history['disc_learning_rates'].append(disc_lr)
 
             # Logging
             log_msg = (
                 f"Epoch {epoch+1}/{epochs} | "
                 f"Train Loss: {train_metrics['loss']:.4f} "
-                f"(Recon: {train_metrics['recon_loss']:.4f}, KL: {train_metrics['kl_loss']:.4f}"
+                f"(Recon: {train_metrics['recon_loss']:.4f}, KL: {train_metrics['kl_loss']:.4f}, "
+                f"Speed MAE: {train_metrics['speed_mae']:.4f}) | "
+                f"Val Loss: {val_metrics['loss']:.4f} "
+                f"(Recon: {val_metrics['recon_loss']:.4f}, KL: {val_metrics['kl_loss']:.4f}, "
+                f"Speed MAE: {val_metrics['speed_mae']:.4f}) | "
+                f"LR: {current_lr:.2e}"
             )
-            
-            if self.use_gan:
-                log_msg += (
-                    f", Gen: {train_metrics['gen_loss']:.4f}, "
-                    f"Disc: {train_metrics['disc_loss']:.4f}"
-                )
-            
-            log_msg += (
-                f") | Val Loss: {val_metrics['loss']:.4f} "
-                f"(Recon: {val_metrics['recon_loss']:.4f}, KL: {val_metrics['kl_loss']:.4f}"
-            )
-            
-            if self.use_gan:
-                log_msg += (
-                    f", Gen: {val_metrics['gen_loss']:.4f}, "
-                    f"Disc: {val_metrics['disc_loss']:.4f}"
-                )
-            
-            log_msg += f") | LR: {current_lr:.2e}"
-            
-            if self.use_gan:
-                log_msg += f" | Disc LR: {disc_lr:.2e}"
-                
             logger.info(log_msg)
 
             # Learning rate scheduling
             self.scheduler.step(val_metrics['loss'])
-            if self.use_gan and self.disc_scheduler:
-                self.disc_scheduler.step(val_metrics['disc_loss'])
 
             # Early stopping check
             if val_metrics['loss'] < self.best_val_loss - self.early_stopping_min_delta:
@@ -366,6 +274,21 @@ class VAETrainer:
                 if self.early_stopping_counter >= self.early_stopping_patience:
                     logger.info(f"Early stopping triggered! No improvement for {self.early_stopping_patience} epochs.")
                     break
+
+        # Final evaluation including generation
+        logger.info("Running final evaluation including generation quality...")
+        final_val_metrics = self.evaluate(val_loader)
+        generation_metrics = self.evaluate_generation(val_loader)
+        
+        # Save final results
+        final_results = {
+            'final_validation': final_val_metrics,
+            'generation_evaluation': generation_metrics,
+            'training_history': self.history
+        }
+        
+        with open(results_dir / 'final_results.json', 'w') as f:
+            json.dump(final_results, f, indent=2)
 
         # Save final model and history
         self.save_checkpoint(results_dir / 'final_model.pt')
@@ -383,32 +306,14 @@ class VAETrainer:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict(),
             'config': self.model.get_config(),
-            'use_gan': self.use_gan,
             'beta': self.beta,
             'global_step': self.global_step,
             'best_val_loss': self.best_val_loss,
             'early_stopping_counter': self.early_stopping_counter,
             'early_stopping_patience': self.early_stopping_patience,
             'early_stopping_min_delta': self.early_stopping_min_delta,
+            'gradient_clip_val': self.gradient_clip_val,
         }
-        
-        if self.use_gan:
-            checkpoint.update({
-                'discriminator_state_dict': self.discriminator.state_dict(),
-                'disc_optimizer_state_dict': self.disc_optimizer.state_dict(),
-                'disc_scheduler_state_dict': self.disc_scheduler.state_dict(),
-                'gamma': self.gamma,
-                'disc_update_freq': self.disc_update_freq,
-                'disc_config': {
-                    'input_dim': self.discriminator.input_dim,
-                    'sequence_length': self.discriminator.sequence_length,
-                    'hidden_dim': self.discriminator.hidden_dim,
-                    'num_layers': self.discriminator.num_layers,
-                    'num_transport_modes': self.model.num_transport_modes,
-                    'condition_dim': self.discriminator.condition_dim,
-                    'architecture': self.discriminator.architecture,
-                }
-            })
         
         torch.save(checkpoint, path)
         logger.debug(f"Saved checkpoint to {path}")
@@ -433,9 +338,9 @@ class VAETrainer:
             model=model,
             device=device,
             beta=checkpoint.get('beta', 1.0),
-            use_gan=checkpoint.get('use_gan', False),
             early_stopping_patience=checkpoint.get('early_stopping_patience', 20),
             early_stopping_min_delta=checkpoint.get('early_stopping_min_delta', 1e-4),
+            gradient_clip_val=checkpoint.get('gradient_clip_val', 1.0),
         )
         
         # Load optimizer state
@@ -447,29 +352,5 @@ class VAETrainer:
         # Load scheduler state
         if 'scheduler_state_dict' in checkpoint:
             trainer.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        
-        # Load GAN components if used
-        if trainer.use_gan and 'discriminator_state_dict' in checkpoint:
-            disc_config = checkpoint.get('disc_config', {})
-            trainer.discriminator = TrajectoryDiscriminator(**disc_config)
-            trainer.discriminator.load_state_dict(checkpoint['discriminator_state_dict'])
-            trainer.discriminator.to(device)
-            
-            trainer.disc_optimizer = torch.optim.Adam(trainer.discriminator.parameters())
-            trainer.disc_optimizer.load_state_dict(checkpoint['disc_optimizer_state_dict'])
-            
-            trainer.gamma = checkpoint.get('gamma', 1.0)
-            trainer.disc_update_freq = checkpoint.get('disc_update_freq', 1)
-            
-            # Load discriminator scheduler if available
-            if 'disc_scheduler_state_dict' in checkpoint:
-                trainer.disc_scheduler = ReduceLROnPlateau(
-                    trainer.disc_optimizer,
-                    mode='min',
-                    patience=10,
-                    factor=0.5,
-                    min_lr=1e-6
-                )
-                trainer.disc_scheduler.load_state_dict(checkpoint['disc_scheduler_state_dict'])
         
         return trainer

@@ -15,8 +15,13 @@ class NetMob25TrajectoryPreprocessor:
     """
     Preprocessor for NetMob25 dataset to prepare data for trajectory generation models.
     
-    This version tracks filtering statistics at each step and uses improved
-    categorization and scaling methods.
+    This version tracks filtering statistics at each step and uses simplified
+    categorization:
+    - CAR: All car-related modes (drivers, passengers, taxis)
+    - PUBLIC_TRANSPORT: Bus, train, subway, tramway
+    - WALKING: Walking only
+    - BIKE: All bikes and e-scooters
+    - MIXED: Multimodal trips
     """
     
     def __init__(self, data_dir='../data/netmob25/', output_dir='../preprocessing/'):
@@ -35,13 +40,12 @@ class NetMob25TrajectoryPreprocessor:
         # Define modes to filter out
         self.excluded_modes = ['OTHER', 'PLANE', 'LIGHT_COMM_VEHICLE', 'ON_DEMAND']
         
-        # Transport mode categories with better names
+        # Transport mode categories - simplified
         self.mode_categories = {
-            'ROAD_DRIVER': ['TWO_WHEELER', 'PRIV_CAR_DRIVER'],
-            'ROAD_PASSENGER': ['PRIV_CAR_PASSENGER', 'TAXI'],
+            'CAR': ['TWO_WHEELER', 'PRIV_CAR_DRIVER', 'PRIV_CAR_PASSENGER', 'TAXI'],
             'PUBLIC_TRANSPORT': ['BUS', 'TRAIN', 'TRAIN_EXPRESS', 'SUBWAY', 'TRAMWAY'],
             'WALKING': ['WALKING'],
-            'MICRO_MOBILITY': ['BIKE', 'ELECT_BIKE', 'ELECT_SCOOTER']
+            'BIKE': ['BIKE', 'ELECT_BIKE', 'ELECT_SCOOTER']
         }
         
         # Create reverse mapping
@@ -56,6 +60,43 @@ class NetMob25TrajectoryPreprocessor:
         # Scalers
         self.scalers = {}
         
+    def compute_gps_metrics(self, gps_points):
+        """
+        Efficiently compute GPS metrics for a trip using vectorized operations.
+        
+        Args:
+            gps_points: Array with columns [timestamp, lat, lon, speed]
+            
+        Returns:
+            tuple: (avg_speed, bird_distance, total_distance) in km/h and km
+        """
+        if len(gps_points) < 2:
+            return 0.0, 0.0, 0.0
+        
+        # Extract coordinates and speeds
+        lats = np.array(gps_points[:, 1], dtype=np.float64)
+        lons = np.array(gps_points[:, 2], dtype=np.float64)
+        speeds = np.array(gps_points[:, 3], dtype=np.float64)
+        
+        # Average speed from GPS speed values
+        # GPS speed might be in m/s or km/h - convert if needed
+        avg_speed = np.mean(speeds) * 3.6 if speeds.mean() < 50 else np.mean(speeds)
+        
+        # Bird distance (straight line from first to last point)
+        # Using simplified distance calculation (accurate enough for small areas)
+        lat_diff = lats[-1] - lats[0]
+        lon_diff = lons[-1] - lons[0]
+        bird_distance = np.sqrt(lat_diff**2 + lon_diff**2) * 111  # Rough km conversion
+        
+        # Total distance (sum of distances between consecutive points)
+        # Vectorized computation for efficiency
+        lat_diffs = np.diff(lats)
+        lon_diffs = np.diff(lons)
+        segment_distances = np.sqrt(lat_diffs**2 + lon_diffs**2) * 111  # Rough km conversion
+        total_distance = np.sum(segment_distances)
+        
+        return avg_speed, bird_distance, total_distance
+    
     def compute_trip_statistics(self, trips_df, group_by=None, label=""):
         """Compute statistics for trips"""
         stats = {}
@@ -67,24 +108,28 @@ class NetMob25TrajectoryPreprocessor:
                 if len(group) > 0:
                     stats[f"{label}_{name}"] = {
                         'nb_trips': len(group),
-                        'sum_weight': group['Weight_Day'].sum() if 'Weight_Day' in group.columns else len(group),
+                        'sum_weight': group['Weight_Day'].sum() if 'Weight_Day' in group.columns else (group['weight'].sum() if 'weight' in group.columns else len(group)),
                         'distance_avg': group['distance_km'].mean() if 'distance_km' in group.columns else np.nan,
                         'distance_std': group['distance_km'].std() if 'distance_km' in group.columns else np.nan,
+                        'bird_distance_avg': group['bird_distance_km'].mean() if 'bird_distance_km' in group.columns else np.nan,
+                        'bird_distance_std': group['bird_distance_km'].std() if 'bird_distance_km' in group.columns else np.nan,
                         'speed_avg': group['speed_kmh'].mean() if 'speed_kmh' in group.columns else np.nan,
                         'speed_std': group['speed_kmh'].std() if 'speed_kmh' in group.columns else np.nan,
-                        'duration_avg': group['Duration'].mean() if 'Duration' in group.columns else np.nan,
-                        'duration_std': group['Duration'].std() if 'Duration' in group.columns else np.nan
+                        'duration_avg': group['Duration'].mean() if 'Duration' in group.columns else (group['duration_minutes'].mean() if 'duration_minutes' in group.columns else np.nan),
+                        'duration_std': group['Duration'].std() if 'Duration' in group.columns else (group['duration_minutes'].std() if 'duration_minutes' in group.columns else np.nan)
                     }
         else:
             stats[label] = {
                 'nb_trips': len(trips_df),
-                'sum_weight': trips_df['Weight_Day'].sum() if 'Weight_Day' in trips_df.columns else len(trips_df),
+                'sum_weight': trips_df['Weight_Day'].sum() if 'Weight_Day' in trips_df.columns else (trips_df['weight'].sum() if 'weight' in trips_df.columns else len(trips_df)),
                 'distance_avg': trips_df['distance_km'].mean() if 'distance_km' in trips_df.columns else np.nan,
                 'distance_std': trips_df['distance_km'].std() if 'distance_km' in trips_df.columns else np.nan,
+                'bird_distance_avg': trips_df['bird_distance_km'].mean() if 'bird_distance_km' in trips_df.columns else np.nan,
+                'bird_distance_std': trips_df['bird_distance_km'].std() if 'bird_distance_km' in trips_df.columns else np.nan,
                 'speed_avg': trips_df['speed_kmh'].mean() if 'speed_kmh' in trips_df.columns else np.nan,
                 'speed_std': trips_df['speed_kmh'].std() if 'speed_kmh' in trips_df.columns else np.nan,
-                'duration_avg': trips_df['Duration'].mean() if 'Duration' in trips_df.columns else np.nan,
-                'duration_std': trips_df['Duration'].std() if 'Duration' in trips_df.columns else np.nan
+                'duration_avg': trips_df['Duration'].mean() if 'Duration' in trips_df.columns else (trips_df['duration_minutes'].mean() if 'duration_minutes' in trips_df.columns else np.nan),
+                'duration_std': trips_df['Duration'].std() if 'Duration' in trips_df.columns else (trips_df['duration_minutes'].std() if 'duration_minutes' in trips_df.columns else np.nan)
             }
         
         return stats
@@ -184,30 +229,186 @@ class NetMob25TrajectoryPreprocessor:
         
         return individuals_filtered, trips_after_filter5
     
+
+    def filter_speed_outliers(self, merged_trips, percentile=99):
+        """Filter trips with speeds above percentile threshold for each mode"""
+        from collections import defaultdict
+        
+        # Group trips by mode
+        trips_by_mode = defaultdict(list)
+        for trip in merged_trips:
+            trips_by_mode[trip['trip_type']].append(trip)
+        
+        filtered_trips = []
+        total_removed = 0
+        total_weight_removed = 0
+        
+        print(f"\nFilter: Speed outliers (>{percentile}th percentile) by mode")
+        
+        # Process each mode separately
+        for mode, mode_trips in sorted(trips_by_mode.items()):
+            speeds = [t['speed_kmh'] for t in mode_trips]
+            
+            if speeds:
+                threshold = np.percentile(speeds, percentile)
+                
+                # Filter trips for this mode
+                mode_filtered = []
+                mode_removed = 0
+                mode_weight_removed = 0
+                
+                for trip in mode_trips:
+                    if trip['speed_kmh'] > threshold:
+                        mode_removed += 1
+                        mode_weight_removed += trip['weight']
+                        total_removed += 1
+                        total_weight_removed += trip['weight']
+                    else:
+                        mode_filtered.append(trip)
+                        filtered_trips.append(trip)
+                
+                if mode_removed > 0:
+                    print(f"  {mode}: {mode_removed} trips removed (threshold: {threshold:.1f} km/h)")
+        
+        print(f"\n  Total trips removed: {total_removed:,}")
+        print(f"  Total weight removed: {total_weight_removed:,.0f}")
+        print(f"  Remaining trips: {len(filtered_trips):,}")
+        
+        return filtered_trips
+
+    def analyze_modes_with_gps(self, merged_trips):
+        """Analyze modes using actual GPS data"""
+        print("\n=== Mode Analysis with GPS Data ===")
+        
+        # Convert to structured data for analysis
+        mode_data = {}
+        
+        for trip in merged_trips:
+            mode = trip['trip_type']
+            if mode not in mode_data:
+                mode_data[mode] = {
+                    'speeds': [],
+                    'bird_distances': [],
+                    'total_distances': [],
+                    'weights': [],
+                    'durations': []
+                }
+            
+            # Compute GPS metrics
+            avg_speed, bird_distance, total_distance = self.compute_gps_metrics(trip['gps_points'])
+            
+            mode_data[mode]['speeds'].append(avg_speed)
+            mode_data[mode]['bird_distances'].append(bird_distance)
+            mode_data[mode]['total_distances'].append(total_distance)
+            mode_data[mode]['weights'].append(trip['weight'])
+            mode_data[mode]['durations'].append(trip['duration_minutes'])
+        
+        # Print statistics for each mode
+        print("\nSingle mode statistics (from GPS data):")
+        for mode in sorted(mode_data.keys()):
+            if mode == 'MIXED':
+                continue
+                
+            data = mode_data[mode]
+            speeds = np.array(data['speeds'])
+            bird_dists = np.array(data['bird_distances'])
+            total_dists = np.array(data['total_distances'])
+            weights = np.array(data['weights'])
+            durations = np.array(data['durations'])
+            
+            print(f"\n{mode}:")
+            print(f"  Trips: {len(speeds):,}")
+            print(f"  Weight: {np.sum(weights):,.0f}")
+            print(f"  Duration (min): {np.mean(durations):.1f} ± {np.std(durations):.1f}")
+            print(f"  Speed avg (km/h): {np.mean(speeds):.1f} ± {np.std(speeds):.1f}")
+            print(f"  Bird distance (km): {np.mean(bird_dists):.2f} ± {np.std(bird_dists):.2f}")
+            print(f"  Total distance (km): {np.mean(total_dists):.2f} ± {np.std(total_dists):.2f}")
+        
+        # Mixed mode analysis
+        if 'MIXED' in mode_data:
+            data = mode_data['MIXED']
+            speeds = np.array(data['speeds'])
+            bird_dists = np.array(data['bird_distances'])
+            total_dists = np.array(data['total_distances'])
+            weights = np.array(data['weights'])
+            durations = np.array(data['durations'])
+            
+            print(f"\nMIXED mode trips:")
+            print(f"  Trips: {len(speeds):,}")
+            print(f"  Weight: {np.sum(weights):,.0f}")
+            print(f"  Duration (min): {np.mean(durations):.1f} ± {np.std(durations):.1f}")
+            print(f"  Speed avg (km/h): {np.mean(speeds):.1f} ± {np.std(speeds):.1f}")
+            print(f"  Bird distance (km): {np.mean(bird_dists):.2f} ± {np.std(bird_dists):.2f}")
+            print(f"  Total distance (km): {np.mean(total_dists):.2f} ± {np.std(total_dists):.2f}")
+        
+        # Category analysis with GPS data
+        print("\n=== Category Analysis with GPS Data ===")
+        
+        category_data = {}
+        for trip in merged_trips:
+            cat = trip['category']
+            if cat not in category_data:
+                category_data[cat] = {
+                    'speeds': [],
+                    'bird_distances': [],
+                    'total_distances': [],
+                    'weights': [],
+                    'durations': []
+                }
+            
+            # Use already computed metrics
+            avg_speed, bird_distance, total_distance = self.compute_gps_metrics(trip['gps_points'])
+            
+            category_data[cat]['speeds'].append(avg_speed)
+            category_data[cat]['bird_distances'].append(bird_distance)
+            category_data[cat]['total_distances'].append(total_distance)
+            category_data[cat]['weights'].append(trip['weight'])
+            category_data[cat]['durations'].append(trip['duration_minutes'])
+        
+        # Print category statistics
+        for cat in sorted(category_data.keys()):
+            data = category_data[cat]
+            speeds = np.array(data['speeds'])
+            bird_dists = np.array(data['bird_distances'])
+            total_dists = np.array(data['total_distances'])
+            weights = np.array(data['weights'])
+            durations = np.array(data['durations'])
+            
+            print(f"\n{cat}:")
+            print(f"  Trips: {len(speeds):,}")
+            print(f"  Weight: {np.sum(weights):,.0f}")
+            print(f"  Duration (min): {np.mean(durations):.1f} ± {np.std(durations):.1f}")
+            print(f"  Speed avg (km/h): {np.mean(speeds):.1f} ± {np.std(speeds):.1f}")
+            print(f"  Bird distance (km): {np.mean(bird_dists):.2f} ± {np.std(bird_dists):.2f}")
+            print(f"  Total distance (km): {np.mean(total_dists):.2f} ± {np.std(total_dists):.2f}")
+        
+        return mode_data, category_data
+    
     def analyze_modes_and_categories(self, trips_filtered):
-        """Analyze trips by mode and category"""
-        print("\n=== Mode Analysis ===")
+        """Analyze trips by mode and category (before GPS data)"""
+        print("\n=== Mode Analysis (before GPS) ===")
         
         # Single mode analysis
         single_mode_trips = trips_filtered[~trips_filtered['is_multimodal']].copy()
         mode_stats = self.compute_trip_statistics(single_mode_trips, 'Main_Mode', 'mode')
         
-        print("\nSingle mode statistics:")
+        print("\nSingle mode statistics (from trip data):")
         for mode, stats in sorted(mode_stats.items()):
             if 'mode_' in mode:
                 mode_name = mode.replace('mode_', '')
                 print(f"\n{mode_name}:")
                 print(f"  Trips: {stats['nb_trips']:,}")
                 print(f"  Weight: {stats['sum_weight']:,.0f}")
-                print(f"  Avg duration: {stats['duration_avg']:.1f} min")
+                print(f"  Duration (min): {stats['duration_avg']:.1f} ± {stats['duration_std']:.1f}")
         
         # Mixed mode analysis
         mixed_trips = trips_filtered[trips_filtered['is_multimodal']].copy()
         if len(mixed_trips) > 0:
             mixed_stats = self.compute_trip_statistics(mixed_trips, label='mixed')
-            print(f"\nMixed mode trips:")
+            print(f"\nMIXED mode trips:")
             print(f"  Trips: {mixed_stats['mixed']['nb_trips']:,}")
             print(f"  Weight: {mixed_stats['mixed']['sum_weight']:,.0f}")
+            print(f"  Duration (min): {mixed_stats['mixed']['duration_avg']:.1f} ± {mixed_stats['mixed']['duration_std']:.1f}")
         
         # Category analysis
         trips_filtered['category'] = trips_filtered['Main_Mode'].map(self.mode_to_category)
@@ -215,18 +416,18 @@ class NetMob25TrajectoryPreprocessor:
         
         category_stats = self.compute_trip_statistics(trips_filtered, 'category', 'category')
         
-        print("\n=== Category Analysis ===")
+        print("\n=== Category Analysis (before GPS) ===")
         for cat, stats in sorted(category_stats.items()):
             if 'category_' in cat:
                 cat_name = cat.replace('category_', '')
                 print(f"\n{cat_name}:")
                 print(f"  Trips: {stats['nb_trips']:,}")
                 print(f"  Weight: {stats['sum_weight']:,.0f}")
-                print(f"  Avg duration: {stats['duration_avg']:.1f} min")
+                print(f"  Duration (min): {stats['duration_avg']:.1f} ± {stats['duration_std']:.1f}")
         
         # Save mode and category statistics
         all_stats = {**mode_stats, **category_stats}
-        with open(self.output_dir / 'mode_category_statistics.pkl', 'wb') as f:
+        with open(self.output_dir / 'mode_category_statistics_before_gps.pkl', 'wb') as f:
             pickle.dump(all_stats, f)
         
         return trips_filtered
@@ -251,6 +452,8 @@ class NetMob25TrajectoryPreprocessor:
         merged_trips = []
         trips_outside_idf = 0
         weight_outside_idf = 0
+        total_trips_to_process = 0
+        total_weight_to_process = 0
         
         user_ids = individuals_filtered['ID'].unique()
         
@@ -272,6 +475,9 @@ class NetMob25TrajectoryPreprocessor:
                 ].copy()
                 
                 if len(trip_gps) > 0:
+                    total_trips_to_process += 1
+                    total_weight_to_process += trip['Weight_Day']
+                    
                     # Check if trip is within IDF bounds
                     within_bounds = (
                         (trip_gps['LATITUDE'] >= self.idf_bounds['lat_min']) &
@@ -285,17 +491,8 @@ class NetMob25TrajectoryPreprocessor:
                         weight_outside_idf += trip['Weight_Day']
                         continue
                     
-                    # Calculate trip distance and speed
-                    coords = trip_gps[['LATITUDE', 'LONGITUDE']].values
-                    if len(coords) > 1:
-                        # Simple distance calculation (can be improved with haversine)
-                        diffs = np.diff(coords, axis=0)
-                        distances = np.sqrt((diffs**2).sum(axis=1)) * 111  # Rough km conversion
-                        total_distance = distances.sum()
-                        avg_speed = (total_distance / (trip['Duration'] / 60)) if trip['Duration'] > 0 else 0
-                    else:
-                        total_distance = 0
-                        avg_speed = 0
+                    # Calculate trip distance and speed using the efficient function
+                    avg_speed, bird_distance, total_distance = self.compute_gps_metrics(trip_gps[['LOCAL_DATETIME_parsed', 'LATITUDE', 'LONGITUDE', 'SPEED']].values)
                     
                     trip_data = {
                         'user_id': user_id,
@@ -306,26 +503,84 @@ class NetMob25TrajectoryPreprocessor:
                         'datetime_D': end_dt,
                         'duration_minutes': trip['Duration'],
                         'distance_km': total_distance,
+                        'bird_distance_km': bird_distance,
                         'speed_kmh': avg_speed,
                         'weight': trip['Weight_Day'],
                         'gps_points': trip_gps[['LOCAL_DATETIME_parsed', 'LATITUDE', 
-                                               'LONGITUDE', 'SPEED']].values
+                                            'LONGITUDE', 'SPEED']].values
                     }
                     merged_trips.append(trip_data)
         
+        # Log filter 2 statistics
         print(f"\nFilter 2: Outside IDF bounds")
-        print(f"  Trips removed: {trips_outside_idf:,}")
-        print(f"  Weight removed: {weight_outside_idf:,.0f}")
-        print(f"  Merged trips: {len(merged_trips)}")
+        print(f"  Trips with GPS data: {total_trips_to_process:,}")
+        print(f"  Trips removed: {trips_outside_idf:,} ({trips_outside_idf/total_trips_to_process*100:.1f}%)")
+        print(f"  Weight removed: {weight_outside_idf:,.0f} ({weight_outside_idf/total_weight_to_process*100:.1f}%)")
+        print(f"  Remaining trips: {len(merged_trips):,}")
         
-        # Add to filtering stats
+        # Add to filtering stats with proper values
         self.filtering_stats.append({
             'step': 'Filter 2: Outside IDF bounds',
+            'trips_before': total_trips_to_process,
+            'trips_after': len(merged_trips),
             'trips_removed': trips_outside_idf,
-            'weight_removed': weight_outside_idf
+            'trips_removed_pct': (trips_outside_idf / total_trips_to_process * 100) if total_trips_to_process > 0 else 0,
+            'weight_before': total_weight_to_process,
+            'weight_after': total_weight_to_process - weight_outside_idf,
+            'weight_removed': weight_outside_idf,
+            'weight_removed_pct': (weight_outside_idf / total_weight_to_process * 100) if total_weight_to_process > 0 else 0
         })
         
-        # Save merged data
+        # Filter speed outliers
+        trips_before_outlier_filter = len(merged_trips)
+        weight_before_outlier_filter = sum(t['weight'] for t in merged_trips)
+        
+        merged_trips = self.filter_speed_outliers(merged_trips, percentile=99)
+        
+        # Add speed outlier filtering to stats
+        trips_after_outlier_filter = len(merged_trips)
+        weight_after_outlier_filter = sum(t['weight'] for t in merged_trips)
+        
+        self.filtering_stats.append({
+            'step': 'Filter 6: Speed outliers (99th percentile)',
+            'trips_before': trips_before_outlier_filter,
+            'trips_after': trips_after_outlier_filter,
+            'trips_removed': trips_before_outlier_filter - trips_after_outlier_filter,
+            'trips_removed_pct': ((trips_before_outlier_filter - trips_after_outlier_filter) / trips_before_outlier_filter * 100) if trips_before_outlier_filter > 0 else 0,
+            'weight_before': weight_before_outlier_filter,
+            'weight_after': weight_after_outlier_filter,
+            'weight_removed': weight_before_outlier_filter - weight_after_outlier_filter,
+            'weight_removed_pct': ((weight_before_outlier_filter - weight_after_outlier_filter) / weight_before_outlier_filter * 100) if weight_before_outlier_filter > 0 else 0
+        })
+        
+        # Recompute and display statistics after filtering
+        print("\n=== Statistics After Speed Outlier Filtering ===")
+        
+        # Group by mode for statistics
+        from collections import defaultdict
+        mode_stats = defaultdict(lambda: {'speeds': [], 'bird_distances': [], 'total_distances': [], 'weights': [], 'durations': []})
+        
+        for trip in merged_trips:
+            mode = trip['trip_type']
+            mode_stats[mode]['speeds'].append(trip['speed_kmh'])
+            mode_stats[mode]['bird_distances'].append(trip['bird_distance_km'])
+            mode_stats[mode]['total_distances'].append(trip['distance_km'])
+            mode_stats[mode]['weights'].append(trip['weight'])
+            mode_stats[mode]['durations'].append(trip['duration_minutes'])
+        
+        # Print updated statistics
+        for mode in sorted(mode_stats.keys()):
+            data = mode_stats[mode]
+            speeds = np.array(data['speeds'])
+            weights = np.array(data['weights'])
+            
+            print(f"\n{mode}:")
+            print(f"  Trips: {len(speeds):,}")
+            print(f"  Weight: {np.sum(weights):,.0f}")
+            print(f"  Speed avg (km/h): {np.mean(speeds):.1f} ± {np.std(speeds):.1f}")
+            print(f"  Speed max (km/h): {np.max(speeds):.1f}")
+        
+        # Save merged data after all filtering
         with open(self.output_dir / 'merged_trips.pkl', 'wb') as f:
             pickle.dump(merged_trips, f)
         
@@ -441,6 +696,7 @@ class NetMob25TrajectoryPreprocessor:
                     'category': trip['category'],
                     'weight': trip['weight'],
                     'distance_km': trip.get('distance_km', 0) * (chunk_length / total_points),
+                    'bird_distance_km': trip.get('bird_distance_km', 0) * (chunk_length / total_points),
                     'speed_kmh': trip.get('speed_kmh', 0),
                     'duration_minutes': trip.get('duration_minutes', 0) * (chunk_length / total_points)
                 })
@@ -458,6 +714,13 @@ class NetMob25TrajectoryPreprocessor:
                 print(f"\n{cat_name}:")
                 print(f"  Sequences: {stats['nb_trips']:,}")
                 print(f"  Weight: {stats['sum_weight']:,.0f}")
+                print(f"  Duration (min): {stats['duration_avg']:.1f} ± {stats['duration_std']:.1f}")
+                print(f"  Total distance (km): {stats['distance_avg']:.2f} ± {stats['distance_std']:.2f}")
+                if 'bird_distance_km' in metadata_df.columns:
+                    bird_stats = metadata_df[metadata_df['category'] == cat_name]['bird_distance_km']
+                    if len(bird_stats) > 0:
+                        print(f"  Bird distance (km): {bird_stats.mean():.2f} ± {bird_stats.std():.2f}")
+                print(f"  Speed (km/h): {stats['speed_avg']:.1f} ± {stats['speed_std']:.1f}")
         
         # Save processed sequences
         with open(self.output_dir / 'processed_sequences.pkl', 'wb') as f:
@@ -548,6 +811,13 @@ class NetMob25TrajectoryPreprocessor:
             'categories': category_encoder.classes_.tolist(),
             'n_categories': len(category_encoder.classes_),
             'mode_categories': self.mode_categories,
+            'category_description': {
+                'CAR': 'Two-wheelers, private car drivers/passengers, and taxis',
+                'PUBLIC_TRANSPORT': 'Bus, train, subway, and tramway',
+                'WALKING': 'Walking only',
+                'BIKE': 'Bikes, e-bikes, and e-scooters',
+                'MIXED': 'Multimodal trips'
+            },
             'scaling_method': 'MinMaxScaler',
             'sequence_method': 'cut_and_pad'
         }
@@ -591,11 +861,18 @@ class NetMob25TrajectoryPreprocessor:
         # Step 1: Load and filter data
         individuals_filtered, trips_filtered = self.load_and_filter_data()
         
-        # Analyze modes and categories
+        # Analyze modes and categories (before GPS)
         trips_filtered = self.analyze_modes_and_categories(trips_filtered)
         
         # Step 2: Merge GPS with trips
         merged_trips = self.merge_gps_with_trips(individuals_filtered, trips_filtered)
+        
+        # Analyze modes with GPS data
+        mode_data, category_data = self.analyze_modes_with_gps(merged_trips)
+        
+        # Save GPS-based statistics
+        with open(self.output_dir / 'mode_category_statistics_with_gps.pkl', 'wb') as f:
+            pickle.dump({'mode_data': mode_data, 'category_data': category_data}, f)
         
         # Step 3: Interpolate and resample
         interpolated_trips = self.interpolate_and_resample(merged_trips)
@@ -642,7 +919,8 @@ def main():
     print("  - individuals_filtered.csv")
     print("  - trips_filtered.csv")
     print("  - filtering_statistics.csv")
-    print("  - mode_category_statistics.pkl")
+    print("  - mode_category_statistics_before_gps.pkl")
+    print("  - mode_category_statistics_with_gps.pkl")
     print("  - merged_trips.pkl")
     print("  - interpolated_trips.pkl")
     print("  - processed_sequences.pkl")
