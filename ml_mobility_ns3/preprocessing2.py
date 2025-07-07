@@ -5,22 +5,18 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import pickle
 from tqdm import tqdm
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from collections import Counter
 import warnings
 warnings.filterwarnings('ignore')
 
 
-class NetMob25Preprocessor:
+class NetMob25TrajectoryPreprocessor:
     """
-    Preprocessor for NetMob25 dataset to prepare data for Conditional VAE training.
+    Preprocessor for NetMob25 dataset to prepare data for trajectory generation models.
     
-    Transport mode handling:
-    - Single mode trips: Uses the Main_Mode value
-    - Multimodal trips: Uses "mixed" when Mode_2 is not null
-    - Similar transport modes are merged into categories
-    
-    This allows the VAE to distinguish between single-mode and multimodal mobility patterns.
+    This version tracks filtering statistics at each step and uses improved
+    categorization and scaling methods.
     """
     
     def __init__(self, data_dir='../data/netmob25/', output_dir='../preprocessing/'):
@@ -28,81 +24,212 @@ class NetMob25Preprocessor:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # IDF bounding box with margin
+        # IDF bounding box
         self.idf_bounds = {
-            'lat_min': 48.21,  # South boundary (around Fontainebleau in Seine-et-Marne)
-            'lat_max': 49.24,  # North boundary (around Chantilly in Val-d'Oise)  
-            'lon_min': 1.45,   # West boundary (around Dreux area in Yvelines)
-            'lon_max': 3.55    # East boundary (around Coulommiers in Seine-et-Marne)
+            'lat_min': 48.21,  # South boundary
+            'lat_max': 49.24,  # North boundary  
+            'lon_min': 1.45,   # West boundary
+            'lon_max': 3.55    # East boundary
         }
         
-        # Transport mode mapping for similar behaviors
-        self.mode_mapping = {
-            # Private car (driver and passenger)
-            'PRIV_CAR_PASSENGER': 'CAR',
-            'PRIV_CAR_DRIVER': 'CAR',
-            
-            # Taxi
-            'TAXI': 'TAXI',
-            
-            # Bus
-            'BUS': 'BUS',
-            
-            # Two wheeler (motorcycle/scooter)
-            'TWO_WHEELER': 'TWO_WHEELER',
-            
-            # Walking
-            'WALKING': 'WALKING',
-            
-            # Rail transport (train, subway, tramway)
-            'TRAIN': 'RAIL',
-            'TRAIN_EXPRESS': 'RAIL',
-            'SUBWAY': 'RAIL',
-            'TRAMWAY': 'RAIL',
-            
-            # Regular bike
-            'BIKE': 'BIKE',
-            
-            # Electric vehicles
-            'ELECT_BIKE': 'ELECTRIC',
-            'ELECT_SCOOTER': 'ELECTRIC',
-            
-            # Other modes
-            'OTHER': 'OTHER',
-            'PLANE': 'OTHER',
-            'LIGHT_COMM_VEHICLE': 'OTHER',
-            'ON_DEMAND': 'OTHER'
+        # Define modes to filter out
+        self.excluded_modes = ['OTHER', 'PLANE', 'LIGHT_COMM_VEHICLE', 'ON_DEMAND']
+        
+        # Transport mode categories with better names
+        self.mode_categories = {
+            'ROAD_DRIVER': ['TWO_WHEELER', 'PRIV_CAR_DRIVER'],
+            'ROAD_PASSENGER': ['PRIV_CAR_PASSENGER', 'TAXI'],
+            'PUBLIC_TRANSPORT': ['BUS', 'TRAIN', 'TRAIN_EXPRESS', 'SUBWAY', 'TRAMWAY'],
+            'WALKING': ['WALKING'],
+            'MICRO_MOBILITY': ['BIKE', 'ELECT_BIKE', 'ELECT_SCOOTER']
         }
         
+        # Create reverse mapping
+        self.mode_to_category = {}
+        for category, modes in self.mode_categories.items():
+            for mode in modes:
+                self.mode_to_category[mode] = category
+        
+        # Filtering statistics
+        self.filtering_stats = []
+        
+        # Scalers
         self.scalers = {}
         
-    def map_transport_mode(self, mode):
-        """Map transport mode to merged category"""
-        if pd.isna(mode):
-            return None
-        return self.mode_mapping.get(mode, 'OTHER')
+    def compute_trip_statistics(self, trips_df, group_by=None, label=""):
+        """Compute statistics for trips"""
+        stats = {}
         
+        if group_by:
+            grouped = trips_df.groupby(group_by)
+            
+            for name, group in grouped:
+                if len(group) > 0:
+                    stats[f"{label}_{name}"] = {
+                        'nb_trips': len(group),
+                        'sum_weight': group['Weight_Day'].sum() if 'Weight_Day' in group.columns else len(group),
+                        'distance_avg': group['distance_km'].mean() if 'distance_km' in group.columns else np.nan,
+                        'distance_std': group['distance_km'].std() if 'distance_km' in group.columns else np.nan,
+                        'speed_avg': group['speed_kmh'].mean() if 'speed_kmh' in group.columns else np.nan,
+                        'speed_std': group['speed_kmh'].std() if 'speed_kmh' in group.columns else np.nan,
+                        'duration_avg': group['Duration'].mean() if 'Duration' in group.columns else np.nan,
+                        'duration_std': group['Duration'].std() if 'Duration' in group.columns else np.nan
+                    }
+        else:
+            stats[label] = {
+                'nb_trips': len(trips_df),
+                'sum_weight': trips_df['Weight_Day'].sum() if 'Weight_Day' in trips_df.columns else len(trips_df),
+                'distance_avg': trips_df['distance_km'].mean() if 'distance_km' in trips_df.columns else np.nan,
+                'distance_std': trips_df['distance_km'].std() if 'distance_km' in trips_df.columns else np.nan,
+                'speed_avg': trips_df['speed_kmh'].mean() if 'speed_kmh' in trips_df.columns else np.nan,
+                'speed_std': trips_df['speed_kmh'].std() if 'speed_kmh' in trips_df.columns else np.nan,
+                'duration_avg': trips_df['Duration'].mean() if 'Duration' in trips_df.columns else np.nan,
+                'duration_std': trips_df['Duration'].std() if 'Duration' in trips_df.columns else np.nan
+            }
+        
+        return stats
+    
+    def log_filtering_step(self, step_name, before_df, after_df):
+        """Log statistics for filtering step"""
+        nb_removed = len(before_df) - len(after_df)
+        weight_before = before_df['Weight_Day'].sum() if 'Weight_Day' in before_df.columns else len(before_df)
+        weight_after = after_df['Weight_Day'].sum() if 'Weight_Day' in after_df.columns else len(after_df)
+        weight_removed = weight_before - weight_after
+        
+        stats = {
+            'step': step_name,
+            'trips_before': len(before_df),
+            'trips_after': len(after_df),
+            'trips_removed': nb_removed,
+            'trips_removed_pct': (nb_removed / len(before_df) * 100) if len(before_df) > 0 else 0,
+            'weight_before': weight_before,
+            'weight_after': weight_after,
+            'weight_removed': weight_removed,
+            'weight_removed_pct': (weight_removed / weight_before * 100) if weight_before > 0 else 0
+        }
+        
+        self.filtering_stats.append(stats)
+        
+        print(f"\n{step_name}:")
+        print(f"  Trips removed: {nb_removed:,} ({stats['trips_removed_pct']:.1f}%)")
+        print(f"  Weight removed: {weight_removed:,.0f} ({stats['weight_removed_pct']:.1f}%)")
+        print(f"  Remaining trips: {len(after_df):,}")
+    
     def load_and_filter_data(self):
-        """Step 1: Load individuals and trips data with filtering"""
-        print("Loading individuals and trips data...")
+        """Step 1: Load and apply sequential filters with statistics tracking"""
+        print("Loading data...")
         
         # Load individuals
         individuals_df = pd.read_csv(self.data_dir / 'individuals_dataset.csv')
         individuals_filtered = individuals_df[individuals_df['GPS_RECORD'] == 1].copy()
-        print(f"Filtered individuals with GPS: {len(individuals_filtered)} / {len(individuals_df)}")
+        print(f"Individuals with GPS: {len(individuals_filtered)} / {len(individuals_df)}")
         
         # Load trips
         trips_df = pd.read_csv(self.data_dir / 'trips_dataset.csv')
-        trips_filtered = trips_df[
-            trips_df[['Date_O', 'Time_O', 'Date_D', 'Time_D']].notnull().all(axis=1)
-        ].copy()
-        print(f"Filtered trips with valid times: {len(trips_filtered)} / {len(trips_df)}")
+        print(f"Initial trips: {len(trips_df)}")
+        
+        # Add Weight_Day column if not present (for testing)
+        if 'Weight_Day' not in trips_df.columns:
+            trips_df['Weight_Day'] = 1.0
+        
+        # Initial statistics
+        initial_stats = self.compute_trip_statistics(trips_df, label="initial")
+        
+        # Filter 1: Missing date/time values
+        trips_filtered = trips_df.copy()
+        mask_complete_times = trips_filtered[['Date_O', 'Time_O', 'Date_D', 'Time_D']].notnull().all(axis=1)
+        trips_after_filter1 = trips_filtered[mask_complete_times].copy()
+        self.log_filtering_step("Filter 1: Missing date/time values", trips_filtered, trips_after_filter1)
+        
+        # Parse dates and times for further filtering
+        trips_after_filter1['datetime_O'] = pd.to_datetime(
+            trips_after_filter1['Date_O'] + ' ' + trips_after_filter1['Time_O'],
+            format='%Y-%m-%d %H:%M:%S'
+        )
+        trips_after_filter1['datetime_D'] = pd.to_datetime(
+            trips_after_filter1['Date_D'] + ' ' + trips_after_filter1['Time_D'],
+            format='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # Filter 3: Trips < 30 seconds
+        trips_after_filter1['duration_seconds'] = (
+            trips_after_filter1['datetime_D'] - trips_after_filter1['datetime_O']
+        ).dt.total_seconds()
+        mask_duration_min = trips_after_filter1['duration_seconds'] >= 30
+        trips_after_filter3 = trips_after_filter1[mask_duration_min].copy()
+        self.log_filtering_step("Filter 3: Trips < 30 seconds", trips_after_filter1, trips_after_filter3)
+        
+        # Filter 4: Trips >= 3 hours
+        mask_duration_max = trips_after_filter3['duration_seconds'] < (3 * 3600)
+        trips_after_filter4 = trips_after_filter3[mask_duration_max].copy()
+        self.log_filtering_step("Filter 4: Trips >= 3 hours", trips_after_filter3, trips_after_filter4)
+        
+        # Filter 5: Excluded modes
+        mask_valid_modes = ~trips_after_filter4['Main_Mode'].isin(self.excluded_modes)
+        trips_after_filter5 = trips_after_filter4[mask_valid_modes].copy()
+        self.log_filtering_step("Filter 5: Excluded modes (OTHER, PLANE, etc.)", trips_after_filter4, trips_after_filter5)
+        
+        # Add trip type (single vs mixed)
+        trips_after_filter5['is_multimodal'] = ~trips_after_filter5['Mode_2'].isna()
+        trips_after_filter5['trip_type'] = trips_after_filter5.apply(
+            lambda x: 'MIXED' if x['is_multimodal'] else x['Main_Mode'], axis=1
+        )
         
         # Save filtered data
         individuals_filtered.to_csv(self.output_dir / 'individuals_filtered.csv', index=False)
-        trips_filtered.to_csv(self.output_dir / 'trips_filtered.csv', index=False)
+        trips_after_filter5.to_csv(self.output_dir / 'trips_filtered.csv', index=False)
         
-        return individuals_filtered, trips_filtered
+        # Save filtering statistics
+        pd.DataFrame(self.filtering_stats).to_csv(self.output_dir / 'filtering_statistics.csv', index=False)
+        
+        return individuals_filtered, trips_after_filter5
+    
+    def analyze_modes_and_categories(self, trips_filtered):
+        """Analyze trips by mode and category"""
+        print("\n=== Mode Analysis ===")
+        
+        # Single mode analysis
+        single_mode_trips = trips_filtered[~trips_filtered['is_multimodal']].copy()
+        mode_stats = self.compute_trip_statistics(single_mode_trips, 'Main_Mode', 'mode')
+        
+        print("\nSingle mode statistics:")
+        for mode, stats in sorted(mode_stats.items()):
+            if 'mode_' in mode:
+                mode_name = mode.replace('mode_', '')
+                print(f"\n{mode_name}:")
+                print(f"  Trips: {stats['nb_trips']:,}")
+                print(f"  Weight: {stats['sum_weight']:,.0f}")
+                print(f"  Avg duration: {stats['duration_avg']:.1f} min")
+        
+        # Mixed mode analysis
+        mixed_trips = trips_filtered[trips_filtered['is_multimodal']].copy()
+        if len(mixed_trips) > 0:
+            mixed_stats = self.compute_trip_statistics(mixed_trips, label='mixed')
+            print(f"\nMixed mode trips:")
+            print(f"  Trips: {mixed_stats['mixed']['nb_trips']:,}")
+            print(f"  Weight: {mixed_stats['mixed']['sum_weight']:,.0f}")
+        
+        # Category analysis
+        trips_filtered['category'] = trips_filtered['Main_Mode'].map(self.mode_to_category)
+        trips_filtered.loc[trips_filtered['is_multimodal'], 'category'] = 'MIXED'
+        
+        category_stats = self.compute_trip_statistics(trips_filtered, 'category', 'category')
+        
+        print("\n=== Category Analysis ===")
+        for cat, stats in sorted(category_stats.items()):
+            if 'category_' in cat:
+                cat_name = cat.replace('category_', '')
+                print(f"\n{cat_name}:")
+                print(f"  Trips: {stats['nb_trips']:,}")
+                print(f"  Weight: {stats['sum_weight']:,.0f}")
+                print(f"  Avg duration: {stats['duration_avg']:.1f} min")
+        
+        # Save mode and category statistics
+        all_stats = {**mode_stats, **category_stats}
+        with open(self.output_dir / 'mode_category_statistics.pkl', 'wb') as f:
+            pickle.dump(all_stats, f)
+        
+        return trips_filtered
     
     def load_gps_file(self, user_id):
         """Load GPS data for a specific user"""
@@ -111,76 +238,32 @@ class NetMob25Preprocessor:
             return None
         
         gps_data = pd.read_csv(gps_file)
-        # Parse timestamps
         gps_data['LOCAL_DATETIME_parsed'] = pd.to_datetime(
             gps_data['LOCAL DATETIME'], 
             format='%Y-%m-%d %H:%M:%S'
         )
         return gps_data
     
-    def analyze_multimodal_trips(self, trips_filtered):
-        """Analyze multimodal trips in the dataset"""
-        print("\nAnalyzing multimodal trips...")
-        
-        # Count single vs multimodal trips
-        single_mode_trips = trips_filtered[trips_filtered['Mode_2'].isna()]
-        multimodal_trips = trips_filtered[~trips_filtered['Mode_2'].isna()]
-        
-        print(f"  Single mode trips: {len(single_mode_trips)} ({len(single_mode_trips)/len(trips_filtered)*100:.1f}%)")
-        print(f"  Multimodal trips: {len(multimodal_trips)} ({len(multimodal_trips)/len(trips_filtered)*100:.1f}%)")
-        
-        if len(multimodal_trips) > 0:
-            # Analyze mode combinations
-            print(f"\n  Most common multimodal combinations:")
-            
-            # Get mode columns
-            mode_cols = [f'Mode_{i}' for i in range(1, 6) if f'Mode_{i}' in multimodal_trips.columns]
-            
-            # Count combinations
-            combinations = []
-            for _, trip in multimodal_trips.iterrows():
-                modes = []
-                for col in mode_cols:
-                    if pd.notna(trip.get(col)):
-                        modes.append(trip[col])
-                if modes:
-                    combinations.append(' -> '.join(modes))
-            
-            combo_counts = Counter(combinations)
-            
-            for combo, count in combo_counts.most_common(10):
-                print(f"    {combo}: {count} trips ({count/len(multimodal_trips)*100:.1f}%)")
-        
-        return single_mode_trips, multimodal_trips
-    
     def merge_gps_with_trips(self, individuals_filtered, trips_filtered):
-        """Step 2: Merge GPS data with trips based on time windows"""
-        print("\nMerging GPS data with trips...")
-        
-        # First analyze multimodal trips
-        single_mode_trips, multimodal_trips = self.analyze_multimodal_trips(trips_filtered)
+        """Step 2: Merge GPS data with trips and filter by IDF bounds"""
+        print("\n=== Merging GPS with Trips ===")
         
         merged_trips = []
+        trips_outside_idf = 0
+        weight_outside_idf = 0
         
-        # Get unique user IDs with GPS data
         user_ids = individuals_filtered['ID'].unique()
         
         for user_id in tqdm(user_ids, desc="Processing users"):
-            # Load GPS data for user
             gps_data = self.load_gps_file(user_id)
             if gps_data is None:
                 continue
             
-            # Get trips for this user
             user_trips = trips_filtered[trips_filtered['ID'] == user_id]
             
             for _, trip in user_trips.iterrows():
-                # Parse trip times
-                start_time = f"{trip['Date_O']} {trip['Time_O']}"
-                end_time = f"{trip['Date_D']} {trip['Time_D']}"
-                
-                start_dt = pd.to_datetime(start_time, format='%Y-%m-%d %H:%M:%S')
-                end_dt = pd.to_datetime(end_time, format='%Y-%m-%d %H:%M:%S')
+                start_dt = trip['datetime_O']
+                end_dt = trip['datetime_D']
                 
                 # Filter GPS points for this trip
                 trip_gps = gps_data[
@@ -189,42 +272,58 @@ class NetMob25Preprocessor:
                 ].copy()
                 
                 if len(trip_gps) > 0:
-                    # Determine transport mode
-                    if pd.isna(trip.get('Mode_2')):
-                        # Single mode trip - map to merged category
-                        transport_mode = self.map_transport_mode(trip['Main_Mode'])
-                    else:
-                        # Multimodal trip
-                        transport_mode = 'MIXED'
+                    # Check if trip is within IDF bounds
+                    within_bounds = (
+                        (trip_gps['LATITUDE'] >= self.idf_bounds['lat_min']) &
+                        (trip_gps['LATITUDE'] <= self.idf_bounds['lat_max']) &
+                        (trip_gps['LONGITUDE'] >= self.idf_bounds['lon_min']) &
+                        (trip_gps['LONGITUDE'] <= self.idf_bounds['lon_max'])
+                    ).all()
                     
-                    # Skip if mode mapping failed
-                    if transport_mode is None:
+                    if not within_bounds:
+                        trips_outside_idf += 1
+                        weight_outside_idf += trip['Weight_Day']
                         continue
+                    
+                    # Calculate trip distance and speed
+                    coords = trip_gps[['LATITUDE', 'LONGITUDE']].values
+                    if len(coords) > 1:
+                        # Simple distance calculation (can be improved with haversine)
+                        diffs = np.diff(coords, axis=0)
+                        distances = np.sqrt((diffs**2).sum(axis=1)) * 111  # Rough km conversion
+                        total_distance = distances.sum()
+                        avg_speed = (total_distance / (trip['Duration'] / 60)) if trip['Duration'] > 0 else 0
+                    else:
+                        total_distance = 0
+                        avg_speed = 0
                     
                     trip_data = {
                         'user_id': user_id,
                         'trip_id': trip['KEY'],
-                        'transport_mode': transport_mode,
-                        'original_mode': trip['Main_Mode'],  # Keep original for reference
-                        'start_time': start_dt,
-                        'end_time': end_dt,
+                        'category': trip['category'],
+                        'trip_type': trip['trip_type'],
+                        'datetime_O': start_dt,
+                        'datetime_D': end_dt,
                         'duration_minutes': trip['Duration'],
+                        'distance_km': total_distance,
+                        'speed_kmh': avg_speed,
+                        'weight': trip['Weight_Day'],
                         'gps_points': trip_gps[['LOCAL_DATETIME_parsed', 'LATITUDE', 
                                                'LONGITUDE', 'SPEED']].values
                     }
                     merged_trips.append(trip_data)
         
-        print(f"Merged {len(merged_trips)} trips with GPS data")
+        print(f"\nFilter 2: Outside IDF bounds")
+        print(f"  Trips removed: {trips_outside_idf:,}")
+        print(f"  Weight removed: {weight_outside_idf:,.0f}")
+        print(f"  Merged trips: {len(merged_trips)}")
         
-        # Count transport modes in merged trips
-        mode_counts = {}
-        for trip in merged_trips:
-            mode = trip['transport_mode']
-            mode_counts[mode] = mode_counts.get(mode, 0) + 1
-        
-        print(f"\nTransport mode distribution after merging:")
-        for mode, count in sorted(mode_counts.items()):
-            print(f"  {mode}: {count} trips ({count/len(merged_trips)*100:.1f}%)")
+        # Add to filtering stats
+        self.filtering_stats.append({
+            'step': 'Filter 2: Outside IDF bounds',
+            'trips_removed': trips_outside_idf,
+            'weight_removed': weight_outside_idf
+        })
         
         # Save merged data
         with open(self.output_dir / 'merged_trips.pkl', 'wb') as f:
@@ -232,48 +331,11 @@ class NetMob25Preprocessor:
         
         return merged_trips
     
-    def check_and_handle_duplicates(self, gps_df):
-        """Check for duplicate timestamps and handle them"""
-        # Check for duplicates
-        duplicated_mask = gps_df['timestamp'].duplicated(keep=False)
-        
-        if duplicated_mask.any():
-            n_duplicates = duplicated_mask.sum()
-            duplicate_groups = gps_df[duplicated_mask].groupby('timestamp')
-            
-            # Check if duplicates have different values
-            differences = []
-            for timestamp, group in duplicate_groups:
-                if len(group) > 1:
-                    # Check if lat/lon/speed values differ
-                    for col in ['lat', 'lon', 'speed']:
-                        unique_vals = group[col].unique()
-                        if len(unique_vals) > 1:
-                            differences.append({
-                                'timestamp': timestamp,
-                                'column': col,
-                                'values': unique_vals.tolist()
-                            })
-            
-            if differences:
-                print(f"\n  Found {n_duplicates} duplicate timestamps with different values:")
-                for diff in differences[:5]:  # Show first 5 differences
-                    print(f"    {diff['timestamp']}: {diff['column']} = {diff['values']}")
-                if len(differences) > 5:
-                    print(f"    ... and {len(differences) - 5} more differences")
-            
-            # Handle duplicates by keeping the first occurrence
-            gps_df = gps_df.drop_duplicates(subset=['timestamp'], keep='first')
-        
-        return gps_df
-    
     def interpolate_and_resample(self, merged_trips):
-        """Step 3: Interpolate to 1s and then subsample to 2s"""
-        print("\nInterpolating and resampling GPS data...")
+        """Step 3: Interpolate to 1s and resample to 2s"""
+        print("\n=== Interpolating and Resampling ===")
         
         interpolated_trips = []
-        n_trips_with_duplicates = 0
-        n_trips_too_short = 0
         
         for trip in tqdm(merged_trips, desc="Interpolating trips"):
             gps_points = trip['gps_points']
@@ -281,19 +343,12 @@ class NetMob25Preprocessor:
             if len(gps_points) < 2:
                 continue
             
-            # Convert to DataFrame for easier handling
+            # Convert to DataFrame
             gps_df = pd.DataFrame(gps_points, 
                                 columns=['timestamp', 'lat', 'lon', 'speed'])
             gps_df['timestamp'] = pd.to_datetime(gps_df['timestamp'])
-            gps_df = gps_df.sort_values('timestamp')
+            gps_df = gps_df.sort_values('timestamp').drop_duplicates('timestamp')
             
-            # Check and handle duplicates
-            original_len = len(gps_df)
-            gps_df = self.check_and_handle_duplicates(gps_df)
-            if len(gps_df) < original_len:
-                n_trips_with_duplicates += 1
-            
-            # Skip if too few points after deduplication
             if len(gps_df) < 2:
                 continue
             
@@ -302,36 +357,23 @@ class NetMob25Preprocessor:
             end_time = gps_df['timestamp'].max()
             time_range = pd.date_range(start=start_time, end=end_time, freq='1S')
             
-            # Skip if time range is too short
             if len(time_range) < 2:
                 continue
             
             try:
                 # Interpolate to 1s
                 interpolated_df = pd.DataFrame(index=time_range)
-                
-                # Set original data
                 gps_df.set_index('timestamp', inplace=True)
                 
-                # Merge and interpolate
                 for col in ['lat', 'lon', 'speed']:
-                    # Use join instead of direct assignment to avoid reindex issues
-                    temp_series = gps_df[col]
-                    interpolated_df = interpolated_df.join(temp_series, how='left')
+                    interpolated_df = interpolated_df.join(gps_df[col], how='left')
                     interpolated_df[col] = interpolated_df[col].interpolate(method='linear')
                 
-                # Fill any remaining NaN values
                 interpolated_df = interpolated_df.ffill().bfill()
                 
                 # Subsample to 2s
                 resampled_df = interpolated_df.iloc[::2].copy()
                 
-                # Filter trips with less than 30 steps after resampling
-                if len(resampled_df) < 30:
-                    n_trips_too_short += 1
-                    continue
-                
-                # Update trip data
                 trip_interpolated = trip.copy()
                 trip_interpolated['gps_points'] = resampled_df.reset_index()[
                     ['index', 'lat', 'lon', 'speed']
@@ -339,23 +381,10 @@ class NetMob25Preprocessor:
                 interpolated_trips.append(trip_interpolated)
                 
             except Exception as e:
-                print(f"\n  Error interpolating trip {trip['trip_id']}: {str(e)}")
+                print(f"\nError interpolating trip {trip['trip_id']}: {str(e)}")
                 continue
         
         print(f"Interpolated {len(interpolated_trips)} trips")
-        print(f"  Removed {n_trips_too_short} trips with less than 30 steps after resampling")
-        if n_trips_with_duplicates > 0:
-            print(f"  Found and handled duplicates in {n_trips_with_duplicates} trips")
-        
-        # Count transport modes after filtering
-        mode_counts_filtered = {}
-        for trip in interpolated_trips:
-            mode = trip['transport_mode']
-            mode_counts_filtered[mode] = mode_counts_filtered.get(mode, 0) + 1
-        
-        print(f"\nTransport mode distribution after filtering short trips:")
-        for mode, count in sorted(mode_counts_filtered.items()):
-            print(f"  {mode}: {count} trips ({count/len(interpolated_trips)*100:.1f}%)")
         
         # Save interpolated data
         with open(self.output_dir / 'interpolated_trips.pkl', 'wb') as f:
@@ -363,161 +392,127 @@ class NetMob25Preprocessor:
         
         return interpolated_trips
     
-    def filter_idf_bounds(self, interpolated_trips):
-        """Step 4: Filter GPS points outside IDF bounds"""
-        print("\nFiltering trips to IDF bounds...")
+    def cut_and_pad_sequences(self, interpolated_trips, sequence_length=2000):
+        """Step 4: Cut sequences into chunks of fixed length and pad the last chunk"""
+        print(f"\n=== Cutting and Padding Sequences (length={sequence_length}) ===")
         
-        filtered_trips = []
+        processed_sequences = []
+        sequence_metadata = []
         
-        for trip in tqdm(interpolated_trips, desc="Filtering bounds"):
+        for trip in tqdm(interpolated_trips, desc="Processing sequences"):
             gps_points = trip['gps_points']
+            total_points = len(gps_points)
             
-            # Filter points within IDF bounds
-            mask = (
-                (gps_points[:, 1] >= self.idf_bounds['lat_min']) &
-                (gps_points[:, 1] <= self.idf_bounds['lat_max']) &
-                (gps_points[:, 2] >= self.idf_bounds['lon_min']) &
-                (gps_points[:, 2] <= self.idf_bounds['lon_max'])
-            )
+            # Cut into chunks of sequence_length
+            n_chunks = int(np.ceil(total_points / sequence_length))
             
-            # Find first and last valid indices
-            valid_indices = np.where(mask)[0]
-            
-            if len(valid_indices) > 0:
-                start_idx = valid_indices[0]
-                end_idx = valid_indices[-1] + 1
+            for chunk_idx in range(n_chunks):
+                start_idx = chunk_idx * sequence_length
+                end_idx = min((chunk_idx + 1) * sequence_length, total_points)
                 
-                trip_filtered = trip.copy()
-                trip_filtered['gps_points'] = gps_points[start_idx:end_idx]
+                chunk_points = gps_points[start_idx:end_idx]
+                chunk_length = len(chunk_points)
                 
-                # Only keep trips that still have at least 30 points after bound filtering
-                if len(trip_filtered['gps_points']) >= 30:
-                    filtered_trips.append(trip_filtered)
-        
-        print(f"Filtered to {len(filtered_trips)} trips within IDF bounds (with ≥30 points)")
-        
-        # Count transport modes after bound filtering
-        mode_counts_bounded = {}
-        for trip in filtered_trips:
-            mode = trip['transport_mode']
-            mode_counts_bounded[mode] = mode_counts_bounded.get(mode, 0) + 1
-        
-        print(f"\nTransport mode distribution after bound filtering:")
-        for mode, count in sorted(mode_counts_bounded.items()):
-            print(f"  {mode}: {count} trips ({count/len(filtered_trips)*100:.1f}%)")
-        
-        # Save filtered data
-        with open(self.output_dir / 'filtered_trips.pkl', 'wb') as f:
-            pickle.dump(filtered_trips, f)
-        
-        return filtered_trips
-    
-    def compute_sequence_length(self, filtered_trips, quantile=0.95):
-        """Step 5: Compute the quantile sequence length"""
-        print(f"\nComputing {quantile*100}% quantile sequence length...")
-        
-        sequence_lengths = [len(trip['gps_points']) for trip in filtered_trips]
-        
-        trip_sequence_length = int(np.quantile(sequence_lengths, quantile))
-        
-        print(f"Sequence length statistics:")
-        print(f"  Min: {np.min(sequence_lengths)}")
-        print(f"  Max: {np.max(sequence_lengths)}")
-        print(f"  Mean: {np.mean(sequence_lengths):.1f}")
-        print(f"  {quantile*100}% quantile: {trip_sequence_length}")
-        
-        # Save sequence length
-        with open(self.output_dir / 'sequence_length.txt', 'w') as f:
-            f.write(str(trip_sequence_length))
-        
-        return trip_sequence_length
-    
-    def pad_or_truncate_sequences(self, filtered_trips, trip_sequence_length):
-        """Step 6: Pad or truncate sequences to fixed length"""
-        print(f"\nPadding/truncating sequences to length {trip_sequence_length}...")
-        
-        processed_trips = []
-        
-        for trip in tqdm(filtered_trips, desc="Processing sequences"):
-            gps_points = trip['gps_points']
-            current_length = len(gps_points)
-            
-            if current_length > trip_sequence_length:
-                # Truncate
-                processed_points = gps_points[:trip_sequence_length]
-                mask = np.ones(trip_sequence_length, dtype=bool)
-            else:
-                # Pad with zeros and create mask
-                padding_length = trip_sequence_length - current_length
-                padding = np.zeros((padding_length, 4))  # 4 features: time, lat, lon, speed
-                processed_points = np.vstack([gps_points, padding])
+                # Pad if necessary
+                if chunk_length < sequence_length:
+                    padding_length = sequence_length - chunk_length
+                    padding = np.zeros((padding_length, 4))
+                    chunk_points = np.vstack([chunk_points, padding])
+                    mask = np.zeros(sequence_length, dtype=bool)
+                    mask[:chunk_length] = True
+                else:
+                    mask = np.ones(sequence_length, dtype=bool)
                 
-                # Create mask (1 for valid data, 0 for padding)
-                mask = np.zeros(trip_sequence_length, dtype=bool)
-                mask[:current_length] = True
-            
-            trip_processed = trip.copy()
-            trip_processed['gps_points'] = processed_points
-            trip_processed['mask'] = mask
-            trip_processed['original_length'] = current_length
-            
-            processed_trips.append(trip_processed)
+                sequence_data = {
+                    'user_id': trip['user_id'],
+                    'trip_id': trip['trip_id'],
+                    'chunk_idx': chunk_idx,
+                    'category': trip['category'],
+                    'trip_type': trip['trip_type'],
+                    'gps_points': chunk_points,
+                    'mask': mask,
+                    'original_length': chunk_length,
+                    'weight': trip['weight']
+                }
+                processed_sequences.append(sequence_data)
+                
+                # Metadata for statistics
+                sequence_metadata.append({
+                    'category': trip['category'],
+                    'weight': trip['weight'],
+                    'distance_km': trip.get('distance_km', 0) * (chunk_length / total_points),
+                    'speed_kmh': trip.get('speed_kmh', 0),
+                    'duration_minutes': trip.get('duration_minutes', 0) * (chunk_length / total_points)
+                })
         
-        # Save processed data
-        with open(self.output_dir / 'processed_trips.pkl', 'wb') as f:
-            pickle.dump(processed_trips, f)
+        print(f"Created {len(processed_sequences)} sequences from {len(interpolated_trips)} trips")
         
-        return processed_trips
+        # Compute statistics by category
+        metadata_df = pd.DataFrame(sequence_metadata)
+        sequence_stats = self.compute_trip_statistics(metadata_df, 'category', 'sequences')
+        
+        print("\nSequence statistics by category:")
+        for cat, stats in sorted(sequence_stats.items()):
+            if 'sequences_' in cat:
+                cat_name = cat.replace('sequences_', '')
+                print(f"\n{cat_name}:")
+                print(f"  Sequences: {stats['nb_trips']:,}")
+                print(f"  Weight: {stats['sum_weight']:,.0f}")
+        
+        # Save processed sequences
+        with open(self.output_dir / 'processed_sequences.pkl', 'wb') as f:
+            pickle.dump(processed_sequences, f)
+        
+        return processed_sequences
     
-    def prepare_vae_data(self, processed_trips, trip_sequence_length):
-        """Step 7: Prepare and scale data for VAE"""
-        print("\nPreparing data for VAE...")
+    def prepare_vae_data(self, processed_sequences):
+        """Step 5: Prepare and scale data for VAE using MinMaxScaler"""
+        print("\n=== Preparing VAE Data ===")
         
-        # Extract features
-        n_trips = len(processed_trips)
+        n_sequences = len(processed_sequences)
+        sequence_length = 2000
         n_features = 3  # lat, lon, speed
         
         # Initialize arrays
-        trajectories = np.zeros((n_trips, trip_sequence_length, n_features))
-        masks = np.zeros((n_trips, trip_sequence_length), dtype=bool)
-        transport_modes = []
-        trip_lengths = []
+        trajectories = np.zeros((n_sequences, sequence_length, n_features))
+        masks = np.zeros((n_sequences, sequence_length), dtype=bool)
+        categories = []
+        weights = []
         
-        for i, trip in enumerate(processed_trips):
-            # Extract trajectory features (excluding timestamp)
-            trajectories[i] = trip['gps_points'][:, 1:4]  # lat, lon, speed
-            masks[i] = trip['mask']
-            transport_modes.append(trip['transport_mode'])
-            trip_lengths.append(trip['original_length'])
+        for i, seq in enumerate(processed_sequences):
+            trajectories[i] = seq['gps_points'][:, 1:4]  # lat, lon, speed
+            masks[i] = seq['mask']
+            categories.append(seq['category'])
+            weights.append(seq['weight'])
         
-        # Encode transport modes
-        mode_encoder = LabelEncoder()
-        transport_modes_encoded = mode_encoder.fit_transform(transport_modes)
+        # Encode categories
+        category_encoder = LabelEncoder()
+        categories_encoded = category_encoder.fit_transform(categories)
         
-        # Scale features
-        print("Scaling features...")
+        # Scale features using MinMaxScaler
+        print("Scaling features with MinMaxScaler...")
         
         # Reshape for scaling
         trajectories_flat = trajectories.reshape(-1, n_features)
         masks_flat = masks.reshape(-1)
         
         # Create scaler and fit only on valid data
-        scaler = StandardScaler()
+        scaler = MinMaxScaler()
         valid_data = trajectories_flat[masks_flat]
         scaler.fit(valid_data)
         
         # Transform all data
         trajectories_scaled = scaler.transform(trajectories_flat).reshape(
-            n_trips, trip_sequence_length, n_features
+            n_sequences, sequence_length, n_features
         )
         
-        # Apply mask to scaled data (set padded values to 0)
-        for i in range(n_trips):
+        # Apply mask to scaled data
+        for i in range(n_sequences):
             trajectories_scaled[i, ~masks[i]] = 0
         
         # Save scalers
         self.scalers['trajectory'] = scaler
-        self.scalers['mode_encoder'] = mode_encoder
+        self.scalers['category_encoder'] = category_encoder
         
         with open(self.output_dir / 'scalers.pkl', 'wb') as f:
             pickle.dump(self.scalers, f)
@@ -526,11 +521,11 @@ class NetMob25Preprocessor:
         vae_dataset = {
             'trajectories': trajectories_scaled.astype(np.float32),
             'masks': masks,
-            'transport_modes': transport_modes_encoded,
-            'trip_lengths': np.array(trip_lengths),
-            'sequence_length': trip_sequence_length,
+            'categories': categories_encoded,
+            'weights': np.array(weights),
+            'sequence_length': sequence_length,
             'feature_names': ['latitude', 'longitude', 'speed'],
-            'mode_encoder': mode_encoder,
+            'category_encoder': category_encoder,
             'scaler': scaler
         }
         
@@ -540,45 +535,64 @@ class NetMob25Preprocessor:
             self.output_dir / 'vae_dataset.npz',
             trajectories=vae_dataset['trajectories'],
             masks=vae_dataset['masks'],
-            transport_modes=vae_dataset['transport_modes'],
-            trip_lengths=vae_dataset['trip_lengths']
+            categories=vae_dataset['categories'],
+            weights=vae_dataset['weights']
         )
         
-        # Save metadata including mode mapping
+        # Save metadata
         metadata = {
-            'sequence_length': trip_sequence_length,
-            'n_trips': n_trips,
+            'sequence_length': sequence_length,
+            'n_sequences': n_sequences,
             'n_features': n_features,
             'feature_names': vae_dataset['feature_names'],
-            'transport_modes': mode_encoder.classes_.tolist(),
-            'n_transport_modes': len(mode_encoder.classes_),
-            'mode_mapping': self.mode_mapping,
-            'min_trip_length': 30,
-            'note': 'Transport modes merged: CAR (driver+passenger), RAIL (train+subway+tramway), ELECTRIC (e-bike+e-scooter), OTHER (plane+commercial+on-demand+other). MIXED indicates multimodal trips. Trips with <30 steps after resampling are filtered out.'
+            'categories': category_encoder.classes_.tolist(),
+            'n_categories': len(category_encoder.classes_),
+            'mode_categories': self.mode_categories,
+            'scaling_method': 'MinMaxScaler',
+            'sequence_method': 'cut_and_pad'
         }
         
         with open(self.output_dir / 'metadata.pkl', 'wb') as f:
             pickle.dump(metadata, f)
         
         print(f"\nVAE dataset prepared:")
-        print(f"  Trajectories shape: {trajectories_scaled.shape}")
-        print(f"  Number of trips: {n_trips}")
-        print(f"  Sequence length: {trip_sequence_length}")
+        print(f"  Sequences: {n_sequences}")
+        print(f"  Sequence length: {sequence_length}")
         print(f"  Features: {vae_dataset['feature_names']}")
-        print(f"  Transport modes: {len(mode_encoder.classes_)}")
-        print(f"  Mode categories: {mode_encoder.classes_.tolist()}")
-        print(f"  Minimum trip length after resampling: 30 steps")
+        print(f"  Categories: {metadata['categories']}")
+        print(f"  Scaling: MinMaxScaler")
         
         return vae_dataset
     
-    def run_full_pipeline(self, quantile=0.95):
+    def save_summary_report(self):
+        """Save a comprehensive summary report"""
+        report = {
+            'filtering_statistics': pd.DataFrame(self.filtering_stats),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        # Save as both CSV and pickle
+        report['filtering_statistics'].to_csv(
+            self.output_dir / 'preprocessing_summary.csv', index=False
+        )
+        
+        with open(self.output_dir / 'preprocessing_report.pkl', 'wb') as f:
+            pickle.dump(report, f)
+        
+        print("\n=== Preprocessing Summary ===")
+        print(report['filtering_statistics'].to_string())
+    
+    def run_full_pipeline(self):
         """Run the complete preprocessing pipeline"""
-        print("Starting NetMob25 VAE preprocessing pipeline...")
+        print("Starting NetMob25 Trajectory Preprocessing Pipeline...")
         print(f"Data directory: {self.data_dir}")
         print(f"Output directory: {self.output_dir}")
         
         # Step 1: Load and filter data
         individuals_filtered, trips_filtered = self.load_and_filter_data()
+        
+        # Analyze modes and categories
+        trips_filtered = self.analyze_modes_and_categories(trips_filtered)
         
         # Step 2: Merge GPS with trips
         merged_trips = self.merge_gps_with_trips(individuals_filtered, trips_filtered)
@@ -586,259 +600,57 @@ class NetMob25Preprocessor:
         # Step 3: Interpolate and resample
         interpolated_trips = self.interpolate_and_resample(merged_trips)
         
-        # Step 4: Filter to IDF bounds
-        filtered_trips = self.filter_idf_bounds(interpolated_trips)
+        # Step 4: Cut and pad sequences
+        processed_sequences = self.cut_and_pad_sequences(interpolated_trips)
         
-        # Step 5: Compute sequence length
-        trip_sequence_length = self.compute_sequence_length(filtered_trips, quantile)
+        # Step 5: Prepare VAE data
+        vae_dataset = self.prepare_vae_data(processed_sequences)
         
-        # Step 6: Pad or truncate sequences
-        processed_trips = self.pad_or_truncate_sequences(filtered_trips, trip_sequence_length)
-        
-        # Step 7: Prepare VAE data
-        vae_dataset = self.prepare_vae_data(processed_trips, trip_sequence_length)
+        # Save summary report
+        self.save_summary_report()
         
         print("\nPreprocessing complete!")
         print(f"All outputs saved to: {self.output_dir}")
         
         return vae_dataset
 
-    def analyze_duplicates_in_dataset(self, merged_trips):
-        """Analyze duplicate timestamps across all trips"""
-        print("\nAnalyzing duplicates in dataset...")
-        
-        total_duplicates = 0
-        trips_with_duplicates = 0
-        duplicate_stats = []
-        
-        for trip in tqdm(merged_trips, desc="Analyzing duplicates"):
-            gps_points = trip['gps_points']
-            
-            if len(gps_points) < 2:
-                continue
-                
-            # Convert to DataFrame
-            gps_df = pd.DataFrame(gps_points, 
-                                columns=['timestamp', 'lat', 'lon', 'speed'])
-            gps_df['timestamp'] = pd.to_datetime(gps_df['timestamp'])
-            
-            # Check for duplicates
-            duplicated_mask = gps_df['timestamp'].duplicated(keep=False)
-            
-            if duplicated_mask.any():
-                trips_with_duplicates += 1
-                n_duplicates = duplicated_mask.sum()
-                total_duplicates += n_duplicates
-                
-                duplicate_stats.append({
-                    'user_id': trip['user_id'],
-                    'trip_id': trip['trip_id'],
-                    'n_duplicates': n_duplicates,
-                    'total_points': len(gps_df),
-                    'duplicate_ratio': n_duplicates / len(gps_df)
-                })
-        
-        print(f"\nDuplicate Analysis Summary:")
-        print(f"  Total trips analyzed: {len(merged_trips)}")
-        print(f"  Trips with duplicates: {trips_with_duplicates} ({trips_with_duplicates/len(merged_trips)*100:.1f}%)")
-        print(f"  Total duplicate points: {total_duplicates}")
-        
-        if duplicate_stats:
-            # Show top trips with most duplicates
-            duplicate_stats.sort(key=lambda x: x['n_duplicates'], reverse=True)
-            print(f"\n  Top 5 trips with most duplicates:")
-            for stat in duplicate_stats[:5]:
-                print(f"    User {stat['user_id']}, Trip {stat['trip_id']}: "
-                      f"{stat['n_duplicates']} duplicates out of {stat['total_points']} points "
-                      f"({stat['duplicate_ratio']*100:.1f}%)")
-        
-        return duplicate_stats
-    
-    def run_from_checkpoint(self, checkpoint_name, quantile=0.95):
-        """Resume pipeline from a specific checkpoint"""
-        checkpoints = {
-            'filtered': 'individuals_filtered.csv',
-            'merged': 'merged_trips.pkl',
-            'interpolated': 'interpolated_trips.pkl',
-            'bounded': 'filtered_trips.pkl',
-            'processed': 'processed_trips.pkl'
-        }
-        
-        if checkpoint_name not in checkpoints:
-            raise ValueError(f"Unknown checkpoint: {checkpoint_name}. "
-                           f"Available: {list(checkpoints.keys())}")
-        
-        checkpoint_file = self.output_dir / checkpoints[checkpoint_name]
-        if not checkpoint_file.exists():
-            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_file}")
-        
-        print(f"Resuming from checkpoint: {checkpoint_name}")
-        
-        # Load data based on checkpoint
-        if checkpoint_name == 'filtered':
-            individuals_filtered = pd.read_csv(self.output_dir / 'individuals_filtered.csv')
-            trips_filtered = pd.read_csv(self.output_dir / 'trips_filtered.csv')
-            
-            # Continue from step 2
-            merged_trips = self.merge_gps_with_trips(individuals_filtered, trips_filtered)
-            interpolated_trips = self.interpolate_and_resample(merged_trips)
-            filtered_trips = self.filter_idf_bounds(interpolated_trips)
-            trip_sequence_length = self.compute_sequence_length(filtered_trips, quantile)
-            processed_trips = self.pad_or_truncate_sequences(filtered_trips, trip_sequence_length)
-            vae_dataset = self.prepare_vae_data(processed_trips, trip_sequence_length)
-            
-        elif checkpoint_name == 'merged':
-            with open(checkpoint_file, 'rb') as f:
-                merged_trips = pickle.load(f)
-            
-            # Optionally analyze duplicates
-            self.analyze_duplicates_in_dataset(merged_trips)
-            
-            # Continue from step 3
-            interpolated_trips = self.interpolate_and_resample(merged_trips)
-            filtered_trips = self.filter_idf_bounds(interpolated_trips)
-            trip_sequence_length = self.compute_sequence_length(filtered_trips, quantile)
-            processed_trips = self.pad_or_truncate_sequences(filtered_trips, trip_sequence_length)
-            vae_dataset = self.prepare_vae_data(processed_trips, trip_sequence_length)
-            
-        elif checkpoint_name == 'interpolated':
-            with open(checkpoint_file, 'rb') as f:
-                interpolated_trips = pickle.load(f)
-            
-            # Continue from step 4
-            filtered_trips = self.filter_idf_bounds(interpolated_trips)
-            trip_sequence_length = self.compute_sequence_length(filtered_trips, quantile)
-            processed_trips = self.pad_or_truncate_sequences(filtered_trips, trip_sequence_length)
-            vae_dataset = self.prepare_vae_data(processed_trips, trip_sequence_length)
-            
-        elif checkpoint_name == 'bounded':
-            with open(checkpoint_file, 'rb') as f:
-                filtered_trips = pickle.load(f)
-            
-            # Continue from step 5
-            trip_sequence_length = self.compute_sequence_length(filtered_trips, quantile)
-            processed_trips = self.pad_or_truncate_sequences(filtered_trips, trip_sequence_length)
-            vae_dataset = self.prepare_vae_data(processed_trips, trip_sequence_length)
-            
-        elif checkpoint_name == 'processed':
-            with open(checkpoint_file, 'rb') as f:
-                processed_trips = pickle.load(f)
-            
-            # Load sequence length
-            with open(self.output_dir / 'sequence_length.txt', 'r') as f:
-                trip_sequence_length = int(f.read().strip())
-            
-            # Continue from step 7
-            vae_dataset = self.prepare_vae_data(processed_trips, trip_sequence_length)
-        
-        print("\nProcessing complete from checkpoint!")
-        return vae_dataset
-    
-    @staticmethod
-    def load_vae_dataset(preprocessing_dir='../preprocessing/'):
-        """Load the preprocessed VAE dataset"""
-        preprocessing_dir = Path(preprocessing_dir)
-        
-        # Load main data
-        data = np.load(preprocessing_dir / 'vae_dataset.npz')
-        
-        # Load metadata
-        with open(preprocessing_dir / 'metadata.pkl', 'rb') as f:
-            metadata = pickle.load(f)
-        
-        # Load scalers
-        with open(preprocessing_dir / 'scalers.pkl', 'rb') as f:
-            scalers = pickle.load(f)
-        
-        return {
-            'trajectories': data['trajectories'],
-            'masks': data['masks'],
-            'transport_modes': data['transport_modes'],
-            'trip_lengths': data['trip_lengths'],
-            'metadata': metadata,
-            'scalers': scalers
-        }
-    
-    @staticmethod
-    def print_dataset_info(vae_data):
-        """Print information about the VAE dataset"""
-        print("\nVAE Dataset Information:")
-        print(f"  Trajectories shape: {vae_data['trajectories'].shape}")
-        print(f"  Number of trips: {len(vae_data['trajectories'])}")
-        print(f"  Sequence length: {vae_data['metadata']['sequence_length']}")
-        print(f"  Features: {vae_data['metadata']['feature_names']}")
-        print(f"  Transport modes: {vae_data['metadata']['transport_modes']}")
-        print(f"  Number of modes: {vae_data['metadata']['n_transport_modes']}")
-        print(f"  Minimum trip length: {vae_data['metadata']['min_trip_length']} steps")
-        
-        if 'note' in vae_data['metadata']:
-            print(f"\n  Note: {vae_data['metadata']['note']}")
-        
-        if 'mode_mapping' in vae_data['metadata']:
-            print(f"\n  Mode mapping:")
-            for original, merged in vae_data['metadata']['mode_mapping'].items():
-                print(f"    {original} → {merged}")
-        
-        # Trip length statistics
-        lengths = vae_data['trip_lengths']
-        print(f"\n  Trip length statistics:")
-        print(f"    Min: {np.min(lengths)}")
-        print(f"    Max: {np.max(lengths)}")
-        print(f"    Mean: {np.mean(lengths):.1f}")
-        print(f"    Std: {np.std(lengths):.1f}")
-        
-        # Transport mode distribution
-        print(f"\n  Transport mode distribution:")
-        mode_counts = np.bincount(vae_data['transport_modes'])
-        for i, mode in enumerate(vae_data['metadata']['transport_modes']):
-            if i < len(mode_counts):
-                print(f"    {mode}: {mode_counts[i]} ({mode_counts[i]/len(vae_data['transport_modes'])*100:.1f}%)")
-
 
 def main():
     """Main function to run preprocessing"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='NetMob25 VAE Preprocessing with Mode Merging')
+    parser = argparse.ArgumentParser(description='NetMob25 Trajectory Preprocessing')
     parser.add_argument('--data-dir', type=str, default='../data/netmob25/',
                         help='Path to NetMob25 data directory')
     parser.add_argument('--output-dir', type=str, default='../preprocessing/',
                         help='Path to output directory')
-    parser.add_argument('--quantile', type=float, default=0.95,
-                        help='Quantile for sequence length (default: 0.95)')
-    parser.add_argument('--checkpoint', type=str, default=None,
-                        choices=['filtered', 'merged', 'interpolated', 'bounded', 'processed'],
-                        help='Resume from checkpoint')
-    parser.add_argument('--analyze-duplicates', action='store_true',
-                        help='Analyze duplicates in the dataset')
+    parser.add_argument('--sequence-length', type=int, default=2000,
+                        help='Fixed sequence length for cutting')
     
     args = parser.parse_args()
     
     # Initialize preprocessor
-    preprocessor = NetMob25Preprocessor(
+    preprocessor = NetMob25TrajectoryPreprocessor(
         data_dir=args.data_dir,
         output_dir=args.output_dir
     )
     
-    if args.checkpoint:
-        # Resume from checkpoint
-        vae_dataset = preprocessor.run_from_checkpoint(args.checkpoint, args.quantile)
-    else:
-        # Run full pipeline
-        vae_dataset = preprocessor.run_full_pipeline(quantile=args.quantile)
+    # Run full pipeline
+    vae_dataset = preprocessor.run_full_pipeline()
     
-    # Print summary
     print("\nSaved files:")
     print("  - individuals_filtered.csv")
     print("  - trips_filtered.csv")
+    print("  - filtering_statistics.csv")
+    print("  - mode_category_statistics.pkl")
     print("  - merged_trips.pkl")
     print("  - interpolated_trips.pkl")
-    print("  - filtered_trips.pkl")
-    print("  - processed_trips.pkl")
-    print("  - sequence_length.txt")
+    print("  - processed_sequences.pkl")
     print("  - scalers.pkl")
     print("  - vae_dataset.npz")
     print("  - metadata.pkl")
+    print("  - preprocessing_summary.csv")
+    print("  - preprocessing_report.pkl")
 
 
 if __name__ == "__main__":
