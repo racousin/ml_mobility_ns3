@@ -44,7 +44,9 @@ chmod +x run_experiments.sh
 ./run_experiments.sh 2 ./preprocessing/vae_dataset.npz results/test_run true
 
 # Generate full report
-python analyze_results.py --results-dir results/experiments --generate-report
+python analyze_results.py --results-dir results/batch_experiments \
+    --sample-trajectories results/batch_experiments/lstm_vae_small \
+    --output-dir analysis_output
 
 # Plot specific experiments
 python analyze_results.py --results-dir results/experiments \
