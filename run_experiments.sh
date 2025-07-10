@@ -6,7 +6,7 @@
 # Default values
 GPU_ID=${1:-0}
 DATA_PATH=${2:-"./preprocessing/vae_dataset.npz"}
-BASE_RESULTS_DIR=${3:-"results/focused_vae"}
+BASE_RESULTS_DIR=${3:-"results/focused_vae_fixed_hidden_and_loss"}
 DRY_RUN=${4:-false}
 
 # Create results directory
@@ -34,6 +34,7 @@ run_experiment() {
     
     local cmd="python ./train.py \
         --data-path $DATA_PATH \
+        --results-dir $BASE_RESULTS_DIR \
         --experiment-name $exp_name \
         --epochs 150 \
         --batch-size $batch_size \
