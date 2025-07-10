@@ -27,6 +27,7 @@ def load_model_from_checkpoint(checkpoint_path: Path, device: str = 'cpu') -> Tu
     config = checkpoint['config']
     
     # Create model with saved configuration
+    #TODO
     model = ConditionalTrajectoryVAE(**config)
     
     # Load state dict

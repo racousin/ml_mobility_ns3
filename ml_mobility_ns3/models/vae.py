@@ -51,6 +51,12 @@ class ConditionalTrajectoryVAE(nn.Module):
         
         # Decoder
         self.fc_latent = nn.Linear(latent_dim + total_condition_dim, hidden_dim)
+        self.fc_latent_h = nn.Linear(latent_dim + total_condition_dim, hidden_dim * num_layers)
+        self.fc_latent_c = nn.Linear(latent_dim + total_condition_dim, hidden_dim * num_layers)
+        
+        # Learnable start token for decoder input
+        self.decoder_start_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
+
         self.decoder_lstm = nn.LSTM(
             hidden_dim, hidden_dim, num_layers, 
             batch_first=True, dropout=dropout if num_layers > 1 else 0
@@ -115,13 +121,19 @@ class ConditionalTrajectoryVAE(nn.Module):
         # Concatenate latent with conditions
         z_conditioned = torch.cat([z, conditions], dim=-1)
         
-        # Project to hidden and create sequence
-        h = self.fc_latent(z_conditioned)
-        h = torch.tanh(h)  # Add non-linearity
-        h = h.unsqueeze(1).repeat(1, self.sequence_length, 1)
+        # Initialize LSTM states from latent code (THIS IS THE KEY CHANGE)
+        h_0 = self.fc_latent_h(z_conditioned).view(self.num_layers, batch_size, self.hidden_dim)
+        c_0 = self.fc_latent_c(z_conditioned).view(self.num_layers, batch_size, self.hidden_dim)
         
-        # Decode sequence
-        out, _ = self.decoder_lstm(h)
+        # Create decoder input sequence from learnable start token
+        decoder_input = self.decoder_start_token.repeat(batch_size, self.sequence_length, 1)
+        
+        # Add noise during training for robustness
+        if self.training:
+            decoder_input = decoder_input + torch.randn_like(decoder_input) * 0.02
+        
+        # Decode sequence with initialized states
+        out, _ = self.decoder_lstm(decoder_input, (h_0, c_0))
         out = self.dropout_layer(out)
         out = self.fc_out(out)
         
@@ -179,41 +191,55 @@ def masked_vae_loss(
     mu: torch.Tensor, 
     logvar: torch.Tensor, 
     mask: torch.Tensor,
-    beta: float = 1.0
+    beta: float = 1.0,
+    lambda_dist: float = 0.5  # Add distance weight
 ) -> Tuple[torch.Tensor, dict]:
-    """
-    VAE loss function with masking for variable-length sequences.
+    """Enhanced VAE loss with distance preservation."""
     
-    Args:
-        recon: Reconstructed trajectories (batch, seq_len, input_dim)
-        x: Original trajectories (batch, seq_len, input_dim)
-        mu: Latent mean (batch, latent_dim)
-        logvar: Latent log variance (batch, latent_dim)
-        mask: Binary mask indicating valid positions (batch, seq_len)
-        beta: Weight for KL loss
-    """
-    # Reconstruction loss with masking (MSE)
-    diff = (recon - x) ** 2  # (batch, seq_len, input_dim)
-    
-    # Expand mask to match input dimensions
-    mask_expanded = mask.unsqueeze(-1).expand_as(diff)  # (batch, seq_len, input_dim)
-    
-    # Apply mask and compute mean over valid positions
+    # 1. Standard reconstruction loss
+    mask_expanded = mask.unsqueeze(-1).expand_as(x)
+    diff = (recon - x) ** 2
     masked_diff = diff * mask_expanded
     num_valid = mask_expanded.sum()
-    recon_loss = masked_diff.sum() / (num_valid + 1e-8)  # avoid division by zero
+    recon_loss = masked_diff.sum() / (num_valid + 1e-8)
     
-    # KL divergence (not masked, applied to latent space)
+    # Compute segment distances
+    def compute_segment_distances(traj, mask):
+        # Distance between consecutive points
+        diff = traj[:, 1:, :2] - traj[:, :-1, :2]  # lat, lon differences
+        distances = torch.sqrt((diff ** 2).sum(dim=-1)) * 111  # km
+        
+        # Mask for valid segments (both points must be valid)
+        seg_mask = mask[:, 1:] * mask[:, :-1]
+        
+        return distances, seg_mask
+    
+    real_dists, seg_mask = compute_segment_distances(x, mask)
+    recon_dists, _ = compute_segment_distances(recon, mask)
+    
+    # Distance loss: preserve segment lengths
+    dist_diff = (recon_dists - real_dists) ** 2 * seg_mask
+    distance_loss = dist_diff.sum() / (seg_mask.sum() + 1e-8)
+    
+    # 3. NEW: Total trajectory length preservation
+    real_total = (real_dists * seg_mask).sum(dim=1)
+    recon_total = (recon_dists * seg_mask).sum(dim=1)
+    total_dist_loss = F.mse_loss(recon_total, real_total)
+    
+    # 4. KL divergence
     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.size(0)
     
-    # Total loss
-    loss = recon_loss + beta * kl_loss
+    # Combined loss
+    loss = recon_loss + beta * kl_loss + lambda_dist * (distance_loss + total_dist_loss)
     
     return loss, {
         'loss': loss.item(),
         'recon_loss': recon_loss.item(),
+        'distance_loss': distance_loss.item(),
+        'total_dist_loss': total_dist_loss.item(),
         'kl_loss': kl_loss.item(),
-        'num_valid_points': num_valid.item()
+        'mean_real_dist': real_total.mean().item(),
+        'mean_recon_dist': recon_total.mean().item()
     }
 
 
