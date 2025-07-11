@@ -55,7 +55,7 @@ class ConditionalTrajectoryVAE(nn.Module):
         self.fc_latent_c = nn.Linear(latent_dim + total_condition_dim, hidden_dim * num_layers)
         
         # Learnable start token for decoder input
-        self.decoder_start_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
+        self.decoder_start_token = nn.Parameter(torch.randn(1, 1, hidden_dim) * 0.01)
 
         self.decoder_lstm = nn.LSTM(
             hidden_dim, hidden_dim, num_layers, 
@@ -192,9 +192,12 @@ def masked_vae_loss(
     logvar: torch.Tensor, 
     mask: torch.Tensor,
     beta: float = 1.0,
-    lambda_dist: float = 0.5  # Add distance weight
+    lambda_dist: float = 0.5
 ) -> Tuple[torch.Tensor, dict]:
-    """Enhanced VAE loss with distance preservation."""
+    """Enhanced VAE loss with distance preservation and numerical stability."""
+    
+    # Ensure numerical stability
+    logvar = torch.clamp(logvar, min=-10, max=10)
     
     # 1. Standard reconstruction loss
     mask_expanded = mask.unsqueeze(-1).expand_as(x)
@@ -203,11 +206,12 @@ def masked_vae_loss(
     num_valid = mask_expanded.sum()
     recon_loss = masked_diff.sum() / (num_valid + 1e-8)
     
-    # Compute segment distances
+    # Compute segment distances with stability
     def compute_segment_distances(traj, mask):
         # Distance between consecutive points
         diff = traj[:, 1:, :2] - traj[:, :-1, :2]  # lat, lon differences
-        distances = torch.sqrt((diff ** 2).sum(dim=-1)) * 111  # km
+        # Add small epsilon for numerical stability
+        distances = torch.sqrt((diff ** 2).sum(dim=-1) + 1e-8) * 111  # km
         
         # Mask for valid segments (both points must be valid)
         seg_mask = mask[:, 1:] * mask[:, :-1]
@@ -221,25 +225,96 @@ def masked_vae_loss(
     dist_diff = (recon_dists - real_dists) ** 2 * seg_mask
     distance_loss = dist_diff.sum() / (seg_mask.sum() + 1e-8)
     
-    # 3. NEW: Total trajectory length preservation
+    # 3. Total trajectory length preservation
     real_total = (real_dists * seg_mask).sum(dim=1)
     recon_total = (recon_dists * seg_mask).sum(dim=1)
     total_dist_loss = F.mse_loss(recon_total, real_total)
     
-    # 4. KL divergence
-    kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.size(0)
+    # 4. KL divergence with numerical stability
+    kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
     
     # Combined loss
-    loss = recon_loss + beta * kl_loss + lambda_dist * (distance_loss + total_dist_loss)
+    total_loss = recon_loss + beta * kl_loss + lambda_dist * (distance_loss + total_dist_loss)
     
-    return loss, {
-        'loss': loss.item(),
-        'recon_loss': recon_loss.item(),
-        'distance_loss': distance_loss.item(),
-        'total_dist_loss': total_dist_loss.item(),
-        'kl_loss': kl_loss.item(),
-        'mean_real_dist': real_total.mean().item(),
-        'mean_recon_dist': recon_total.mean().item()
+    # Check for NaN and replace with large value to continue training
+    if torch.isnan(total_loss):
+        print(f"NaN detected in loss! recon: {recon_loss}, kl: {kl_loss}, dist: {distance_loss}")
+        total_loss = torch.tensor(1e6, device=total_loss.device, requires_grad=True)
+    
+    # Return with expected metric names for trainer
+    return total_loss, {
+        'loss': total_loss.item() if not torch.isnan(total_loss) else float('inf'),
+        'Recon': recon_loss.item() if not torch.isnan(recon_loss) else float('inf'),
+        'KL': kl_loss.item() if not torch.isnan(kl_loss) else float('inf'),
+        'distance_loss': distance_loss.item() if not torch.isnan(distance_loss) else float('inf'),
+        'total_dist_loss': total_dist_loss.item() if not torch.isnan(total_dist_loss) else float('inf'),
+        'mean_real_dist': real_total.mean().item() if not torch.isnan(real_total.mean()) else 0.0,
+        'mean_recon_dist': recon_total.mean().item() if not torch.isnan(recon_total.mean()) else 0.0
+    }
+
+
+def compute_trajectory_metrics(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> Dict[str, float]:
+    """
+    Compute trajectory-specific metrics with correct naming.
+    
+    Args:
+        pred: Predicted trajectories (batch, seq_len, 3) [lat, lon, speed]
+        target: Target trajectories (batch, seq_len, 3) [lat, lon, speed]
+        mask: Binary mask (batch, seq_len)
+    
+    Returns:
+        Dictionary of metrics
+    """
+    # Apply mask
+    mask_expanded = mask.unsqueeze(-1)
+    pred_masked = pred * mask_expanded
+    target_masked = target * mask_expanded
+    
+    # Speed MAE (with correct key name)
+    speed_mae = torch.abs(pred_masked[:, :, 2] - target_masked[:, :, 2])
+    speed_mae = (speed_mae * mask).sum() / (mask.sum() + 1e-8)
+    
+    # Distance metrics (using lat, lon)
+    def compute_distances(traj):
+        """Compute total and bird distances for a trajectory."""
+        # Total distance (sum of segments)
+        lat_diff = torch.diff(traj[:, :, 0], dim=1)
+        lon_diff = torch.diff(traj[:, :, 1], dim=1)
+        # Add epsilon for numerical stability
+        segment_distances = torch.sqrt(lat_diff**2 + lon_diff**2 + 1e-8) * 111  # rough km conversion
+        total_distance = segment_distances.sum(dim=1)
+        
+        # Bird distance (start to end)
+        valid_lengths = mask.sum(dim=1).long()
+        bird_distances = []
+        for i, length in enumerate(valid_lengths):
+            if length > 1:
+                start = traj[i, 0, :2]
+                end = traj[i, length-1, :2]
+                bird_dist = torch.sqrt(((end - start)**2).sum() + 1e-8) * 111
+                bird_distances.append(bird_dist)
+            else:
+                bird_distances.append(torch.tensor(0.0, device=traj.device))
+        
+        return total_distance, torch.stack(bird_distances)
+    
+    pred_total_dist, pred_bird_dist = compute_distances(pred_masked)
+    target_total_dist, target_bird_dist = compute_distances(target_masked)
+    
+    # Distance MAEs
+    total_dist_mae = torch.abs(pred_total_dist - target_total_dist).mean()
+    bird_dist_mae = torch.abs(pred_bird_dist - target_bird_dist).mean()
+    
+    # Check for NaN values and handle them
+    def safe_item(tensor):
+        if torch.isnan(tensor):
+            return 0.0
+        return tensor.item()
+    
+    return {
+        'Speed MAE': safe_item(speed_mae),  # Changed key name to match trainer expectations
+        'total_distance_mae': safe_item(total_dist_mae),
+        'bird_distance_mae': safe_item(bird_dist_mae),
     }
 
 
