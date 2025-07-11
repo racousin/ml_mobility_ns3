@@ -1,5 +1,5 @@
 analysis_output/
-
+outputs/
 libtorch/
 libtorch*
 data/

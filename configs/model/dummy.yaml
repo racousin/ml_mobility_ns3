@@ -1,0 +1,3 @@
+_target_: ml_mobility_ns3.models.dummy.DummyModel
+name: dummy
+input_dim: 3

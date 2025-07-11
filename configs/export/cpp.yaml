@@ -1,0 +1,3 @@
+output_dir: cpp_export
+template_dir: cpp_templates
+compile_torchscript: true
