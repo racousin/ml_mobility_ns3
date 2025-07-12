@@ -2,7 +2,6 @@ defaults:
   - data: netmob25
   - model: vae_lstm
   - training: default
-  - device: gpu
   - export: cpp
   - _self_
 
