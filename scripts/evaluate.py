@@ -55,13 +55,8 @@ def main(cfg: DictConfig):
     if experiment_id:
         exp_dir = find_experiment_dir(experiment_id)
     else:
-        # Check if checkpoint_dir is absolute or contains 'experiments'
-        if Path(cfg.training.checkpoint_dir).is_absolute() or 'experiments' in cfg.training.checkpoint_dir:
-            checkpoint_dir = Path(cfg.training.checkpoint_dir)
-            exp_dir = checkpoint_dir.parent if checkpoint_dir.name == 'checkpoints' else checkpoint_dir
-        else:
-            # Find latest experiment
-            exp_dir = find_experiment_dir()
+        # Find latest experiment
+        exp_dir = find_experiment_dir()
     
     if not exp_dir or not exp_dir.exists():
         logger.error("No experiment directory found")

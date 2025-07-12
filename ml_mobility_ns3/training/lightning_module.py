@@ -4,10 +4,11 @@ import torch
 import torch.nn.functional as F
 from typing import Dict, Any
 from hydra.utils import instantiate
-from omegaconf import OmegaConf  # Add this import
+from omegaconf import OmegaConf
 import logging
 
 from ..metrics.trajectory_metrics import TrajectoryMetrics
+from .losses import create_loss
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,15 @@ class TrajectoryLightningModule(pl.LightningModule):
             logger.error(f"Failed to instantiate model: {e}")
             raise
         
-        self.beta = config.training.beta
+        # Create loss function from config
+        loss_config = config.training.get('loss', {'type': 'simple_vae', 'params': {'beta': 1.0}})
+        self.loss_fn = create_loss(loss_config)
+        logger.info(f"Using loss function: {loss_config['type']}")
+        
+        # Backward compatibility
+        self.beta = config.training.get('beta', 1.0)
         self.lambda_dist = config.training.get('lambda_dist', 0.5)
+        
         self.metrics = TrajectoryMetrics()
         self.save_hyperparameters()
         
@@ -45,78 +53,97 @@ class TrajectoryLightningModule(pl.LightningModule):
     
     def compute_loss(self, batch, outputs):
         x, mask, transport_mode, length = batch
-        recon = outputs['recon']
-        mu = outputs['mu']
-        logvar = outputs['logvar']
         
-        # Ensure numerical stability
-        logvar = torch.clamp(logvar, min=-10, max=10)
-        
-        # Reconstruction loss
-        mask_expanded = mask.unsqueeze(-1).expand_as(x)
-        diff = (recon - x) ** 2
-        masked_diff = diff * mask_expanded
-        num_valid = mask_expanded.sum()
-        recon_loss = masked_diff.sum() / (num_valid + 1e-8)
-        
-        # Distance preservation loss
-        metrics_pred = self.metrics.compute_gps_metrics_torch(recon, mask)
-        metrics_target = self.metrics.compute_gps_metrics_torch(x, mask)
-        
-        distance_loss = F.mse_loss(metrics_pred['total_distance'], metrics_target['total_distance'])
-        
-        # KL divergence
-        kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-        
-        # Total loss
-        loss = recon_loss + self.beta * kl_loss + self.lambda_dist * distance_loss
-        
-        metrics_dict = {
-            'recon_loss': recon_loss,
-            'kl_loss': kl_loss,
-            'distance_loss': distance_loss,
-            'total_loss': loss
+        if mask.dim() == 1:
+            batch_size, seq_len, _ = x.shape
+            new_mask = torch.zeros(batch_size, seq_len, device=x.device)
+            for i in range(batch_size):
+                valid_len = int(mask[i].item())
+                new_mask[i, :valid_len] = 1.0
+            mask = new_mask
+        # Prepare targets dict
+        targets = {
+            'x': x,
+            'transport_mode': transport_mode,
+            'length': length
         }
         
-        return loss, metrics_dict
+        # Compute loss using configured loss function
+        loss_dict = self.loss_fn(outputs, targets, mask)
+        
+        return loss_dict['total'], loss_dict
+    
+    def compute_standard_metrics(self, pred, target, mask):
+        """Compute standardized metrics for all models."""
+        return self.metrics.compute_comprehensive_metrics(pred, target, mask)
     
     def training_step(self, batch, batch_idx):
-        outputs = self.forward(*batch)
-        loss, metrics = self.compute_loss(batch, outputs)
+        x, mask, transport_mode, length = batch
+        outputs = self.forward(x, transport_mode, length, mask)
+        loss, loss_components = self.compute_loss(batch, outputs)
         
-        # Compute trajectory metrics
-        traj_metrics = self.metrics.compute_trajectory_mae(
-            outputs['recon'], batch[0], batch[1]
-        )
+        # Compute standardized metrics
+        std_metrics = self.compute_standard_metrics(outputs['recon'], batch[0], batch[1])
         
+        # Log loss components
         self.log('train_loss', loss, prog_bar=True)
-        self.log('train_recon_loss', metrics['recon_loss'])
-        self.log('train_kl_loss', metrics['kl_loss'])
-        self.log('train_distance_loss', metrics['distance_loss'])
+        for key, value in loss_components.items():
+            if key != 'total':
+                self.log(f'train_{key}', value)
         
-        for key, value in traj_metrics.items():
+        # Log standardized metrics
+        for key, value in std_metrics.items():
             self.log(f'train_{key}', value)
         
         return loss
     
     def validation_step(self, batch, batch_idx):
-        outputs = self.forward(*batch)
-        loss, metrics = self.compute_loss(batch, outputs)
         
-        # Compute trajectory metrics
-        traj_metrics = self.metrics.compute_trajectory_mae(
-            outputs['recon'], batch[0], batch[1]
-        )
+        x, mask, transport_mode, length = batch
+        outputs = self.forward(x, transport_mode, length, mask)
+        loss, loss_components = self.compute_loss(batch, outputs)
         
+        # Compute standardized metrics
+        std_metrics = self.compute_standard_metrics(outputs['recon'], batch[0], batch[1])
+        
+        # Log loss components
         self.log('val_loss', loss, prog_bar=True)
-        self.log('val_recon_loss', metrics['recon_loss'])
-        self.log('val_kl_loss', metrics['kl_loss'])
-        self.log('val_distance_loss', metrics['distance_loss'])
+        for key, value in loss_components.items():
+            if key != 'total':
+                self.log(f'val_{key}', value)
         
-        for key, value in traj_metrics.items():
+        # Log standardized metrics - these are the key metrics for comparison
+        for key, value in std_metrics.items():
             self.log(f'val_{key}', value)
         
+        # Store metrics for epoch end summary
+        self.validation_step_outputs = getattr(self, 'validation_step_outputs', [])
+        self.validation_step_outputs.append({
+            'loss': loss,
+            'metrics': std_metrics
+        })
+        
         return loss
+    
+    def on_validation_epoch_end(self):
+        """Log epoch-level summaries of key metrics."""
+        if hasattr(self, 'validation_step_outputs') and self.validation_step_outputs:
+            # Aggregate key metrics
+            avg_metrics = {}
+            metric_keys = ['mse', 'speed_mse', 'total_distance_mae', 'bird_distance_mae', 'frechet_distance']
+            
+            for key in metric_keys:
+                values = [out['metrics'][key].item() for out in self.validation_step_outputs 
+                         if key in out['metrics']]
+                if values:
+                    avg_metrics[key] = sum(values) / len(values)
+            
+            # Log summary
+            self.log('val_epoch_mse', avg_metrics.get('mse', 0), prog_bar=True)
+            self.log('val_epoch_frechet', avg_metrics.get('frechet_distance', 0), prog_bar=True)
+            
+            # Clear outputs
+            self.validation_step_outputs.clear()
     
     def configure_optimizers(self):
         # Check if model has parameters
@@ -125,7 +152,7 @@ class TrajectoryLightningModule(pl.LightningModule):
             raise ValueError("Model has no parameters to optimize")
         
         optimizer = torch.optim.AdamW(
-            params,  # Use explicit params list
+            params,
             lr=self.config.training.learning_rate,
             weight_decay=1e-5
         )

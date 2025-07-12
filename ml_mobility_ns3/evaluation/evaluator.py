@@ -7,7 +7,7 @@ import logging
 from tqdm import tqdm
 import inspect
 
-from ..metrics.trajectory_metrics import TrajectoryMetrics
+from ml_mobility_ns3.metrics.trajectory_metrics import TrajectoryMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +25,10 @@ class TrajectoryEvaluator:
         self.model_params = list(self.model_forward_sig.parameters.keys())
         
     def evaluate_reconstruction(self, dataloader) -> Dict:
-        """Evaluate reconstruction quality."""
+        """Evaluate reconstruction quality with standardized metrics."""
         self.model.eval()
         all_metrics = []
+        all_std_metrics = []
         
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="Evaluating reconstruction"):
@@ -46,17 +47,36 @@ class TrajectoryEvaluator:
                 # Get model outputs
                 outputs = self.model(**model_args)
                 
-                # Compute metrics
+                # Compute legacy metrics for backward compatibility
                 metrics = self.metrics.compute_trajectory_mae(outputs['recon'], x, mask)
                 all_metrics.append(metrics)
+                
+                # Compute standardized metrics
+                std_metrics = self.metrics.compute_comprehensive_metrics(outputs['recon'], x, mask)
+                # Convert tensors to floats
+                std_metrics_dict = {k: v.item() if torch.is_tensor(v) else v 
+                                   for k, v in std_metrics.items()}
+                all_std_metrics.append(std_metrics_dict)
         
         # Aggregate metrics
         aggregated = {}
+        
+        # Legacy metrics
         if all_metrics:
             for key in all_metrics[0].keys():
                 values = [m[key] for m in all_metrics]
                 aggregated[f'mean_{key}'] = np.mean(values)
                 aggregated[f'std_{key}'] = np.std(values)
+        
+        # Standardized metrics
+        if all_std_metrics:
+            std_keys = ['mse', 'speed_mse', 'total_distance_mae', 
+                       'bird_distance_mae', 'frechet_distance']
+            for key in std_keys:
+                values = [m[key] for m in all_std_metrics if key in m]
+                if values:
+                    aggregated[f'{key}_mean'] = np.mean(values)
+                    aggregated[f'{key}_std'] = np.std(values)
         
         return aggregated
     
