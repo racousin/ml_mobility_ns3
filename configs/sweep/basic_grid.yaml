@@ -1,17 +1,14 @@
 # @package _global_
 defaults:
   - override /hydra/sweeper: basic
-  - override /hydra/launcher: joblib
 
 accelerator: gpu
-devices: [4]  # Fixed device, use CLI to override if needed
+devices: [4]
 
 hydra:
-  launcher:
-    n_jobs: 1  # Since using same GPU
   sweeper:
     params:
       model.hidden_dim: 128,256,512
       model.latent_dim: 16,32,64
-      training.batch_size: 16,32,64,128
+      training.batch_size: 16,32,64
       loss.params.beta: 0.5,1.0,2.0
