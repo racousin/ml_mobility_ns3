@@ -171,10 +171,10 @@ def main(cfg: DictConfig):
         enable_version_counter=False
     )
     
-    # FIXED: Use cfg.early_stopping_patience instead of cfg.training.early_stopping_patience
+    # FIXED: Use cfg.training.early_stopping_patience 
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=cfg.early_stopping_patience,
+        patience=cfg.training.early_stopping_patience,
         mode='min',
         verbose=True
     )
