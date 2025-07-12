@@ -2,8 +2,12 @@ defaults:
   - data: netmob25
   - model: vae_lstm
   - training: default
+  - device: gpu
   - export: cpp
   - _self_
+
+accelerator: gpu
+devices: [1] 
 
 hydra:
   run:

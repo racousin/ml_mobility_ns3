@@ -49,6 +49,8 @@ All configurations are managed through Hydra. Default configs are in `configs/`.
 ```bash
 python scripts/train.py model=dummy  # Use dummy model
 python scripts/train.py model=vae_lstm  # Use VAE-LSTM model
+
+python scripts/train.py --config-path=configs/sweep --config-name=basic_grid accelerator=gpu devices=[3] device=cuda --multirun
 ```
 
 ### Hyperparameter Tuning

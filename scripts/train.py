@@ -106,11 +106,22 @@ def main(cfg: DictConfig):
     update_manifest(experiment_id, cfg.model.name)
     
     pl.seed_everything(cfg.seed)
-    
-    # For Mac, disable MPS for now
-    if torch.backends.mps.is_available():
-        logger.info("MPS available but using CPU for stability")
-        cfg.device = 'cpu'
+    if cfg.accelerator == 'auto':
+        if torch.cuda.is_available():
+            cfg.accelerator = 'gpu'
+            cfg.device = 'cuda'
+        elif torch.backends.mps.is_available():
+            cfg.accelerator = 'mps'
+            cfg.device = 'mps'
+        else:
+            cfg.accelerator = 'cpu'
+            cfg.device = 'cpu'
+
+    logger.info(f"Using accelerator: {cfg.accelerator}, device: {cfg.device}")
+    # # For Mac, disable MPS for now
+    # if torch.backends.mps.is_available():
+    #     logger.info("MPS available but using CPU for stability")
+    #     cfg.device = 'cpu'
     
     # Load dataset
     dataset = TrajectoryDataset(Path(cfg.data.output_dir) / 'dataset.npz')
@@ -181,8 +192,8 @@ def main(cfg: DictConfig):
     # Trainer
     trainer = pl.Trainer(
         max_epochs=cfg.training.epochs,
-        accelerator='cpu',
-        devices=1,
+        accelerator=cfg.accelerator,
+        devices=cfg.devices,
         callbacks=[checkpoint_callback, early_stopping],
         logger=tb_logger,
         gradient_clip_val=cfg.training.gradient_clip,
