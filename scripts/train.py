@@ -177,10 +177,10 @@ def main(cfg: DictConfig):
     
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=cfg.training.early_stopping_patience,
+        patience=cfg.early_stopping_patience,
         mode='min',
         verbose=True
-    )
+        )
     
     # Logger with experiment directory
     tb_logger = TensorBoardLogger(
