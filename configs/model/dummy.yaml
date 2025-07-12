@@ -1,3 +1,5 @@
 _target_: ml_mobility_ns3.models.dummy.DummyModel
 name: dummy
 input_dim: 3
+num_transport_modes: 5
+latent_dim: 16

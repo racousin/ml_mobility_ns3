@@ -5,6 +5,7 @@ import numpy as np
 from typing import Dict, List
 import logging
 from tqdm import tqdm
+import inspect
 
 from ..metrics.trajectory_metrics import TrajectoryMetrics
 
@@ -19,6 +20,10 @@ class TrajectoryEvaluator:
         self.model = self.model.to(self.device)
         self.metrics = TrajectoryMetrics()
         
+        # Check what arguments the model's forward method accepts
+        self.model_forward_sig = inspect.signature(self.model.forward)
+        self.model_params = list(self.model_forward_sig.parameters.keys())
+        
     def evaluate_reconstruction(self, dataloader) -> Dict:
         """Evaluate reconstruction quality."""
         self.model.eval()
@@ -29,8 +34,17 @@ class TrajectoryEvaluator:
                 # Move batch to device
                 x, mask, transport_mode, length = [b.to(self.device) for b in batch]
                 
+                # Prepare arguments based on what the model accepts
+                model_args = {'x': x}
+                if 'transport_mode' in self.model_params:
+                    model_args['transport_mode'] = transport_mode
+                if 'length' in self.model_params:
+                    model_args['length'] = length
+                if 'mask' in self.model_params:
+                    model_args['mask'] = mask
+                
                 # Get model outputs
-                outputs = self.model(x, transport_mode, length, mask)
+                outputs = self.model(**model_args)
                 
                 # Compute metrics
                 metrics = self.metrics.compute_trajectory_mae(outputs['recon'], x, mask)
@@ -50,9 +64,11 @@ class TrajectoryEvaluator:
         """Evaluate generation quality."""
         self.model.eval()
         
-        # Get number of transport modes from config
+        # Get number of transport modes from config or model
         if hasattr(self.config.model, 'num_transport_modes'):
             n_transport_modes = self.config.model.num_transport_modes
+        elif hasattr(self.model, 'num_transport_modes'):
+            n_transport_modes = self.model.num_transport_modes
         else:
             n_transport_modes = 5  # Default
         

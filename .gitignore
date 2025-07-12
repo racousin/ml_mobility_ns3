@@ -11,6 +11,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 cpp/
+experiments/
+logs/
+
 
 # Distribution / packaging
 .Python
