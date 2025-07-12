@@ -118,10 +118,6 @@ def main(cfg: DictConfig):
             cfg.device = 'cpu'
 
     logger.info(f"Using accelerator: {cfg.accelerator}, device: {cfg.device}")
-    # # For Mac, disable MPS for now
-    # if torch.backends.mps.is_available():
-    #     logger.info("MPS available but using CPU for stability")
-    #     cfg.device = 'cpu'
     
     # Load dataset
     dataset = TrajectoryDataset(Path(cfg.data.output_dir) / 'dataset.npz')
@@ -175,12 +171,13 @@ def main(cfg: DictConfig):
         enable_version_counter=False
     )
     
+    # FIXED: Use cfg.early_stopping_patience instead of cfg.training.early_stopping_patience
     early_stopping = EarlyStopping(
         monitor='val_loss',
         patience=cfg.early_stopping_patience,
         mode='min',
         verbose=True
-        )
+    )
     
     # Logger with experiment directory
     tb_logger = TensorBoardLogger(
