@@ -4,8 +4,11 @@ defaults:
   - override /hydra/launcher: joblib
 
 hydra:
+  launcher:
+    n_jobs: 4 
   sweeper:
     params:
+      devices: "[1]","[2]","[3]","[4]" 
       model.hidden_dim: 128,256,512
       model.latent_dim: 16,32,64
       training.batch_size: 16,32,64,128
