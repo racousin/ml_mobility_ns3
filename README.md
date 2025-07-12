@@ -23,10 +23,15 @@ python scripts/preprocess.py data.data_dir=data/netmob25
 python scripts/train.py model=vae_lstm training.epochs=100
 ```
 
+### List Experiments
+```bash
+python scripts/list_experiments.py --detailed
+```
+
 ### Evaluation
 
 ```bash
-python scripts/evaluate.py
+python scripts/evaluate.py exp_id=dummy_2025-07-12_13-14-14
 ```
 
 ### Export to C++
