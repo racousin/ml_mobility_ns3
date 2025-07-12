@@ -3,12 +3,3 @@ epochs: 500
 learning_rate: 0.01
 val_split: 0.1
 gradient_clip: 1.0
-
-loss:
-  type: simple_vae 
-  params:
-    beta: 1.0
-
-lr_scheduler_patience: 15
-lr_scheduler_factor: 0.5
-early_stopping_patience: 30
