@@ -1,9 +1,11 @@
 # @package _global_
 defaults:
+  - /config  # This inherits your base config
   - override /hydra/sweeper: basic
 
+# Override specific settings for sweep
 accelerator: gpu
-devices: [4]
+devices: [3]
 
 hydra:
   sweeper:
