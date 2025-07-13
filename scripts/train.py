@@ -78,14 +78,24 @@ class TrainingPipeline:
             if torch.cuda.is_available():
                 self.cfg.accelerator = 'gpu'
                 self.cfg.device = 'cuda'
+                # Keep devices as is for GPU (could be 'auto', int, or list)
             elif torch.backends.mps.is_available():
                 self.cfg.accelerator = 'mps'
                 self.cfg.device = 'mps'
+                # Keep devices as is for MPS
             else:
                 self.cfg.accelerator = 'cpu'
                 self.cfg.device = 'cpu'
+                # Set devices to 1 for CPU (required by PyTorch Lightning)
+                self.cfg.devices = 1
+        elif self.cfg.accelerator == 'cpu':
+            # Ensure device is set correctly for CPU
+            self.cfg.device = 'cpu'
+            # Set devices to integer for CPU accelerator
+            if not isinstance(self.cfg.devices, int):
+                self.cfg.devices = 1
         
-        logger.info(f"Using accelerator: {self.cfg.accelerator}, device: {self.cfg.device}")
+        logger.info(f"Using accelerator: {self.cfg.accelerator}, device: {self.cfg.device}, devices: {self.cfg.devices}")
     
     def load_data(self) -> tuple:
         """Load and split dataset."""
@@ -109,7 +119,7 @@ class TrainingPipeline:
             train_dataset, 
             batch_size=self.cfg.training.batch_size,
             shuffle=True,
-            num_workers=0,
+            num_workers=9,
             pin_memory=False
         )
         
@@ -117,7 +127,7 @@ class TrainingPipeline:
             val_dataset,
             batch_size=self.cfg.training.batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=9,
             pin_memory=False
         )
         
@@ -158,8 +168,8 @@ class TrainingPipeline:
     def finalize_experiment(self, exp_dir: Path, experiment_id: str, 
                           trainer: pl.Trainer, checkpoint_callback, status: str):
         """Finalize experiment after training."""
-        # Save best model checkpoint
-        if checkpoint_callback.best_model_path:
+        # Save best model checkpoint (only if checkpoint_callback exists)
+        if checkpoint_callback and checkpoint_callback.best_model_path:
             best_checkpoint = Path(checkpoint_callback.best_model_path)
             best_model_link = exp_dir / "checkpoints" / "best_model.ckpt"
             
@@ -180,7 +190,7 @@ class TrainingPipeline:
         with open(model_info_path, "r") as f:
             model_info = json.load(f)
         
-        # Add parameter count if not already there
+        # Add parameter count if not already there and model exists
         if "parameters" not in model_info and hasattr(self, 'model'):
             param_count = sum(p.numel() for p in self.model.model.parameters())
             model_info["parameters"] = {
@@ -189,15 +199,20 @@ class TrainingPipeline:
             }
         
         # Update with final info
+        final_metrics = {
+            "best_val_loss": best_metrics.get('val_loss'),
+            "best_epoch": best_metrics.get('epoch'),
+            "best_metrics": best_metrics
+        }
+        
+        # Add trainer info if available
+        if trainer:
+            final_metrics["epochs_trained"] = trainer.current_epoch + 1
+        
         model_info.update({
             "status": status,
             "completed_at": datetime.now().isoformat(),
-            "final_metrics": {
-                "best_val_loss": best_metrics.get('val_loss'),
-                "epochs_trained": trainer.current_epoch + 1,
-                "best_epoch": best_metrics.get('epoch'),
-                "best_metrics": best_metrics
-            },
+            "final_metrics": final_metrics,
             "checkpoint_files": {
                 "best": "checkpoints/best_model.ckpt",
                 "last": "checkpoints/last.ckpt"
@@ -215,7 +230,7 @@ class TrainingPipeline:
             "experiment_id": experiment_id,
             "model_type": self.cfg.model.name,
             "status": status,
-            "final_metrics": model_info["final_metrics"],
+            "final_metrics": final_metrics,
             "training_time": datetime.now().isoformat(),
             "checkpoints": {
                 "best": str(exp_dir / "checkpoints" / "best_model.ckpt"),

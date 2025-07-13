@@ -70,7 +70,7 @@ def main(cfg: DictConfig):
         dataset, 
         batch_size=cfg.training.batch_size,
         shuffle=False,
-        num_workers=0
+        num_workers=9
     )
     
     # Evaluate

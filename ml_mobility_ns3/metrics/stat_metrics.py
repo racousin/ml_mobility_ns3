@@ -24,9 +24,9 @@ class StatMetrics:
         if scaler_path is None:
             # Try default paths
             default_paths = [
-                Path('output/scalers.pkl'),
-                Path('../output/scalers.pkl'),
-                Path('../../output/scalers.pkl'),
+                Path('data/processed/scalers.pkl'),
+                Path('../data/processed/scalers.pkl'),
+                Path('../../data/processed/scalers.pkl'),
             ]
             for path in default_paths:
                 if path.exists():
