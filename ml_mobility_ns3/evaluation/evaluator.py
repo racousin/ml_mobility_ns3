@@ -1,11 +1,11 @@
 # ml_mobility_ns3/evaluation/evaluator.py
 import torch
-from pathlib import Path
 import numpy as np
-from typing import Dict, List
+from typing import Dict
 import logging
 from tqdm import tqdm
-import inspect
+import pickle
+from pathlib import Path
 
 from ml_mobility_ns3.metrics.stat_metrics import StatMetrics
 
@@ -13,113 +13,104 @@ logger = logging.getLogger(__name__)
 
 
 class TrajectoryEvaluator:
+    """Simplified evaluator for trajectory generation models."""
+    
     def __init__(self, model, config):
         self.model = model
         self.config = config
         self.device = config.device if config.device != 'cuda' else 'cpu'
         self.model = self.model.to(self.device)
-        self.metrics = StatMetrics()
+        self.stat_metrics = StatMetrics()
         
-        # Check what arguments the model's forward method accepts
-        self.model_forward_sig = inspect.signature(self.model.forward)
-        self.model_params = list(self.model_forward_sig.parameters.keys())
+        # Load category encoder
+        self.category_encoder = self._load_category_encoder()
         
-    def evaluate_reconstruction(self, dataloader) -> Dict:
-        """Evaluate reconstruction quality with standardized metrics."""
+        # Load real data statistics
+        self.real_stats = self._load_real_statistics()
+    
+    def _load_category_encoder(self):
+        """Load category encoder from scalers."""
+        scaler_path = Path(self.config.data.output_dir) / 'scalers.pkl'
+        if scaler_path.exists():
+            with open(scaler_path, 'rb') as f:
+                scalers = pickle.load(f)
+                return scalers.get('category_encoder')
+        return None
+    
+    def _load_real_statistics(self) -> Dict:
+        """Load real data statistics from preprocessing."""
+        report_path = Path(self.config.data.output_dir) / 'preprocessing_report.pkl'
+        if report_path.exists():
+            try:
+                with open(report_path, 'rb') as f:
+                    report = pickle.load(f)
+                    return report.get('category_statistics', {})
+            except Exception as e:
+                logger.warning(f"Could not load preprocessing stats: {e}")
+        return {}
+    
+    def evaluate_generation(self, dataloader) -> Dict:
+        """
+        Generate trajectories for entire dataset and compute statistics.
+        
+        Args:
+            dataloader: DataLoader with all trajectories
+            
+        Returns:
+            Dictionary with per-category statistics
+        """
         self.model.eval()
-        all_metrics = []
-        all_std_metrics = []
+        
+        all_generated = []
+        all_masks = []
+        all_categories = []
+        all_lengths = []
+        
+        logger.info("Generating trajectories for entire dataset...")
         
         with torch.no_grad():
-            for batch in tqdm(dataloader, desc="Evaluating reconstruction"):
-                # Move batch to device
+            for batch in tqdm(dataloader, desc="Generating trajectories"):
+                # Unpack batch
                 x, mask, transport_mode, length = [b.to(self.device) for b in batch]
+                batch_size = x.shape[0]
                 
-                # Prepare arguments based on what the model accepts
-                model_args = {'x': x}
-                if 'transport_mode' in self.model_params:
-                    model_args['transport_mode'] = transport_mode
-                if 'length' in self.model_params:
-                    model_args['length'] = length
-                if 'mask' in self.model_params:
-                    model_args['mask'] = mask
+                # Prepare conditions from real data
+                conditions = {
+                    'transport_mode': transport_mode,
+                    'length': length
+                }
                 
-                # Get model outputs
-                outputs = self.model(**model_args)
-                
-                # Compute legacy metrics for backward compatibility
-                metrics = self.metrics.compute_trajectory_mae(outputs['recon'], x, mask)
-                all_metrics.append(metrics)
-                
-                # Compute standardized metrics
-                std_metrics = self.metrics.compute_comprehensive_metrics(outputs['recon'], x, mask)
-                # Convert tensors to floats
-                std_metrics_dict = {k: v.item() if torch.is_tensor(v) else v 
-                                   for k, v in std_metrics.items()}
-                all_std_metrics.append(std_metrics_dict)
+                # Generate trajectories
+                try:
+                    generated = self.model.generate(conditions, batch_size)
+                    
+                    # Store results
+                    all_generated.append(generated.cpu())
+                    all_masks.append(mask.cpu())
+                    all_categories.append(transport_mode.cpu())
+                    all_lengths.append(length.cpu())
+                    
+                except Exception as e:
+                    logger.error(f"Error generating batch: {e}")
+                    continue
         
-        # Aggregate metrics
-        aggregated = {}
+        # Concatenate all results
+        if not all_generated:
+            logger.error("No trajectories generated")
+            return {}
         
-        # Legacy metrics
-        if all_metrics:
-            for key in all_metrics[0].keys():
-                values = [m[key] for m in all_metrics]
-                aggregated[f'mean_{key}'] = np.mean(values)
-                aggregated[f'std_{key}'] = np.std(values)
+        generated_trajectories = torch.cat(all_generated, dim=0)
+        masks = torch.cat(all_masks, dim=0)
+        categories = torch.cat(all_categories, dim=0)
+        lengths = torch.cat(all_lengths, dim=0)
         
-        # Standardized metrics
-        if all_std_metrics:
-            std_keys = ['mse', 'speed_mse', 'total_distance_mae', 
-                       'bird_distance_mae', 'kl_loss']
-            for key in std_keys:
-                values = [m[key] for m in all_std_metrics if key in m]
-                if values:
-                    aggregated[f'{key}_mean'] = np.mean(values)
-                    aggregated[f'{key}_std'] = np.std(values)
+        # Compute per-category statistics using shared function
+        category_stats = self.stat_metrics.compute_category_statistics(
+            generated_trajectories, masks, categories, lengths
+        )
         
-        return aggregated
-    
-    def evaluate_generation(self, n_samples_per_mode: int = 100) -> Dict:
-        """Evaluate generation quality."""
-        self.model.eval()
-        
-        # Get number of transport modes from config or model
-        if hasattr(self.config.model, 'num_transport_modes'):
-            n_transport_modes = self.config.model.num_transport_modes
-        elif hasattr(self.model, 'num_transport_modes'):
-            n_transport_modes = self.model.num_transport_modes
-        else:
-            n_transport_modes = 5  # Default
-        
-        generation_metrics = {
-            'n_samples_per_mode': n_samples_per_mode,
-            'n_transport_modes': n_transport_modes
+        return {
+            'generated_stats': category_stats,
+            'real_stats': self.real_stats,
+            'n_generated': len(generated_trajectories)
         }
-        
-        # For each transport mode
-        for mode in range(n_transport_modes):
-            mode_name = f'mode_{mode}'
-            
-            # Generate samples
-            conditions = {
-                'transport_mode': torch.tensor([mode] * n_samples_per_mode).to(self.device),
-                'length': torch.tensor([500] * n_samples_per_mode).to(self.device)  # Fixed length
-            }
-            
-            with torch.no_grad():
-                trajectories = self.model.generate(conditions, n_samples_per_mode)
-            
-            # Compute generation statistics
-            # Create a dummy mask for the generated trajectories
-            mask = torch.ones(n_samples_per_mode, trajectories.shape[1], dtype=torch.bool).to(self.device)
-            
-            # Compute metrics on generated data
-            gen_metrics = self.metrics.compute_gps_metrics_torch(trajectories, mask)
-            
-            # Store aggregated metrics
-            generation_metrics[f'{mode_name}_avg_speed'] = gen_metrics['avg_speed'].mean().item()
-            generation_metrics[f'{mode_name}_avg_bird_distance'] = gen_metrics['bird_distance'].mean().item()
-            generation_metrics[f'{mode_name}_avg_total_distance'] = gen_metrics['total_distance'].mean().item()
-        
-        return generation_metrics

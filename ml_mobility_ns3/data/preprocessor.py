@@ -507,17 +507,35 @@ class TrajectoryPreprocessor:
         logger.info(f"Dataset saved to {self.output_dir}")
     
     def _save_summary_report(self):
-        """Save preprocessing summary report."""
-        report = {
-            'filtering_statistics': pd.DataFrame(self.filtering_stats),
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
-        
-        report['filtering_statistics'].to_csv(
-            self.output_dir / 'preprocessing_summary.csv', index=False
-        )
-        
-        with open(self.output_dir / 'preprocessing_report.pkl', 'wb') as f:
-            pickle.dump(report, f)
-        
-        logger.info("Preprocessing summary saved")
+            """Save preprocessing summary report with dataset statistics."""
+            # Load the saved dataset to compute statistics
+            dataset_path = self.output_dir / 'dataset.npz'
+            data = np.load(dataset_path)
+            
+            trajectories = data['trajectories']
+            masks = data['masks']
+            categories = data['categories']
+            lengths = data['lengths']
+            
+            # Compute statistics per category using shared function
+            category_stats = self.metrics.compute_category_statistics(
+                trajectories, masks, categories, lengths
+            )
+            
+            report = {
+                'filtering_statistics': pd.DataFrame(self.filtering_stats),
+                'category_statistics': category_stats,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            report['filtering_statistics'].to_csv(
+                self.output_dir / 'preprocessing_summary.csv', index=False
+            )
+            
+            with open(self.output_dir / 'preprocessing_report.pkl', 'wb') as f:
+                pickle.dump(report, f)
+            
+            # Print category statistics using shared function
+            self.metrics.print_category_statistics(category_stats, "Dataset Statistics by Category")
+            
+            logger.info("Preprocessing summary saved")

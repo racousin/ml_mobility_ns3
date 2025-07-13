@@ -7,7 +7,7 @@ from hydra.utils import instantiate
 from omegaconf import OmegaConf
 import logging
 
-from ml_mobility_ns3.metrics.stat_metrics import DiffMetrics
+from ml_mobility_ns3.metrics.diff_metrics import DiffMetrics
 from .losses import create_loss
 
 logger = logging.getLogger(__name__)
