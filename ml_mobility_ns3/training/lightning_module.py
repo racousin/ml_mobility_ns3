@@ -125,7 +125,7 @@ class TrajectoryLightningModule(pl.LightningModule):
     
     def training_step(self, batch, batch_idx):
         """Training step."""
-        x, mask, transport_mode, length = self.on_validation_epoch_end(batch)
+        x, mask, transport_mode, length = self._prepare_batch(batch)  # FIXED: was self.on_validation_epoch_end(batch)
         
         # Forward pass
         outputs = self.forward(x, transport_mode, length, mask)
