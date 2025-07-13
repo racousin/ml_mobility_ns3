@@ -1,0 +1,15 @@
+batch_size: 16  # Smaller due to model complexity
+epochs: 300
+learning_rate: 0.001  # Lower learning rate for stability
+val_split: 0.1
+gradient_clip: 1.0
+early_stopping_patience: 40
+lr_scheduler_patience: 20
+lr_scheduler_factor: 0.5
+
+# Hierarchical loss configuration
+loss:
+  type: hierarchical_vae
+  params:
+    beta_local: 1.0   # Weight for local segment KL losses
+    beta_global: 2.0  # Weight for global trajectory KL loss
