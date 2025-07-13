@@ -107,10 +107,12 @@ def update_manifest(experiment_id: str, model_type: str, status: str = "training
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
     logger = logging.getLogger(__name__)
-    metrics_tracker = BestMetricsTracker(exp_dir)
+
     # Create experiment ID and directory
-    experiment_id = create_experiment_id(cfg.model.name)
+    experiment_id = create_experiment_id(cfg.model.name, cfg)
     exp_dir = setup_experiment_dir(experiment_id, cfg)
+
+    metrics_tracker = BestMetricsTracker(exp_dir)
     
     logger.info(f"Created experiment: {experiment_id}")
     logger.info(f"Experiment directory: {exp_dir}")
