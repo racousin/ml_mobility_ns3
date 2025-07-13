@@ -1,0 +1,9 @@
+# configs/model/vae_dense.yaml
+_target_: ml_mobility_ns3.models.vae_dense.ConditionalTrajectoryVAEDense
+name: vae_dense
+input_dim: 3
+hidden_dim: 256
+latent_dim: 32
+condition_dim: 32
+dropout: 0.1
+num_hidden_layers: 2

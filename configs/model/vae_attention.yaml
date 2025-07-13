@@ -1,0 +1,11 @@
+# configs/model/vae_attention.yaml
+_target_: ml_mobility_ns3.models.vae_attention.ConditionalTrajectoryVAEAttention
+name: vae_attention
+input_dim: 3
+hidden_dim: 256
+latent_dim: 32
+num_layers: 2
+condition_dim: 32
+dropout: 0.1
+num_attention_heads: 8
+num_attention_layers: 2
