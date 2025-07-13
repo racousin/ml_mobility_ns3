@@ -170,11 +170,68 @@ class SpeedAwareVAELoss(BaseLoss):
         }
 
 
+class HierarchicalVAELoss(nn.Module):
+    """Loss function for Hierarchical VAE."""
+    
+    def __init__(self, beta_local: float = 1.0, beta_global: float = 1.0):
+        super().__init__()
+        self.beta_local = beta_local
+        self.beta_global = beta_global
+    
+    def __call__(self, outputs: Dict[str, torch.Tensor], 
+                 targets: Dict[str, torch.Tensor], 
+                 mask: torch.Tensor) -> Dict[str, torch.Tensor]:
+        
+        recon = outputs['recon']
+        x = targets['x']
+        
+        # Reconstruction loss
+        mask_expanded = mask.unsqueeze(-1).expand_as(x)
+        valid_positions = mask_expanded.bool()
+        valid_recon = recon[valid_positions]
+        valid_x = x[valid_positions]
+        recon_loss = F.mse_loss(valid_recon, valid_x)
+        
+        # Local KL losses (sum over all segments)
+        segment_mus = outputs['segment_mus']  # [batch_size, num_segments, segment_latent_dim]
+        segment_logvars = outputs['segment_logvars']
+        
+        local_kl_loss = 0
+        num_segments = segment_mus.size(1)
+        for i in range(num_segments):
+            mu = segment_mus[:, i]
+            logvar = segment_logvars[:, i]
+            kl = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
+            local_kl_loss += kl
+        local_kl_loss /= num_segments
+        
+        # Global KL loss
+        global_mu = outputs['global_mu']
+        global_logvar = outputs['global_logvar']
+        global_kl_loss = -0.5 * torch.mean(
+            torch.sum(1 + global_logvar - global_mu.pow(2) - global_logvar.exp(), dim=1)
+        )
+        
+        # Total loss
+        total = (recon_loss + 
+                self.beta_local * local_kl_loss + 
+                self.beta_global * global_kl_loss)
+        
+        return {
+            'total': total,
+            'recon_loss': recon_loss,
+            'local_kl_loss': local_kl_loss,
+            'global_kl_loss': global_kl_loss,
+            'weighted_local_kl': self.beta_local * local_kl_loss,
+            'weighted_global_kl': self.beta_global * global_kl_loss
+        }
+
 # Loss factory
 LOSS_REGISTRY = {
     'simple_vae': SimpleVAELoss,
     'distance_aware_vae': DistanceAwareVAELoss,
-    'speed_aware_vae': SpeedAwareVAELoss
+    'speed_aware_vae': SpeedAwareVAELoss,
+    'hierarchical_vae': HierarchicalVAELoss,  # Add this line
 }
 
 

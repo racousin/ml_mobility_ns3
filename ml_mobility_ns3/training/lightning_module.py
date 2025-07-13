@@ -97,11 +97,11 @@ class TrajectoryLightningModule(pl.LightningModule):
     
     def _log_metrics(self, loss: torch.Tensor, loss_components: Dict, 
                     metrics: Dict, prefix: str = 'train'):
-        """Log all metrics with proper prefix."""
+        """Log all metrics with proper prefix - supports hierarchical VAE."""
         # Log main loss
         self.log(f'{prefix}_loss', loss, prog_bar=True)
         
-        # Log loss components
+        # Log loss components - handle different VAE types
         for key, value in loss_components.items():
             if key != 'total':
                 self.log(f'{prefix}_{key}', value)
@@ -109,10 +109,23 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Log standardized metrics
         for key, value in metrics.items():
             self.log(f'{prefix}_{key}', value)
+        
+        # Special handling for hierarchical VAE progress bar
+        if 'local_kl_loss' in loss_components and 'global_kl_loss' in loss_components:
+            # Show key hierarchical metrics in progress bar for training
+            if prefix == 'train':
+                self.log(f'{prefix}_local_kl', loss_components['local_kl_loss'], prog_bar=True)
+                self.log(f'{prefix}_global_kl', loss_components['global_kl_loss'], prog_bar=True)
+            
+            # Calculate and log the local/global KL ratio for analysis
+            local_kl = loss_components['local_kl_loss']
+            global_kl = loss_components['global_kl_loss']
+            kl_ratio = local_kl / (global_kl + 1e-8)
+            self.log(f'{prefix}_kl_ratio', kl_ratio)
     
     def training_step(self, batch, batch_idx):
         """Training step."""
-        x, mask, transport_mode, length = self._prepare_batch(batch)
+        x, mask, transport_mode, length = self.on_validation_epoch_end(batch)
         
         # Forward pass
         outputs = self.forward(x, transport_mode, length, mask)
@@ -153,11 +166,11 @@ class TrajectoryLightningModule(pl.LightningModule):
         return loss
     
     def on_validation_epoch_end(self):
-        """Aggregate validation metrics at epoch end."""
+        """Aggregate validation metrics at epoch end - enhanced for hierarchical VAE."""
         if not self._validation_outputs:
             return
         
-        # Define key metrics to aggregate
+        # Define key metrics to aggregate - include hierarchical VAE metrics
         key_metrics = ['mse', 'speed_mae', 'distance_mae', 'total_distance_mae', 'bird_distance_mae']
         
         # Aggregate metrics
@@ -172,15 +185,15 @@ class TrajectoryLightningModule(pl.LightningModule):
         if 'mse' in avg_metrics:
             self.log('val_epoch_mse', avg_metrics['mse'], prog_bar=True)
         
-        # IMPROVED: Log additional epoch metrics for better visibility
+        # Log additional epoch metrics for better visibility
         if 'speed_mae' in avg_metrics:
             self.log('val_epoch_speed_mae', avg_metrics['speed_mae'], prog_bar=False)
         if 'total_distance_mae' in avg_metrics:
             self.log('val_epoch_total_dist_mae', avg_metrics['total_distance_mae'], prog_bar=False)
         
-        # ADDED: Log a summary of key metrics at epoch end
+        # Enhanced logging for hierarchical VAE
         current_epoch = self.current_epoch
-        if current_epoch % 5 == 0 or current_epoch == 0:  # Every 5 epochs or first epoch
+        if current_epoch % 5 == 0 or current_epoch == 0:
             logger.info(f"\n{'='*50}")
             logger.info(f"EPOCH {current_epoch} VALIDATION SUMMARY")
             logger.info(f"{'='*50}")

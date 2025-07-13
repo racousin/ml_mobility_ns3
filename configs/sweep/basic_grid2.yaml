@@ -20,8 +20,16 @@ hydra:
 # Run all in parallel (each on different GPU)
 python scripts/train.py model.hidden_dim=128,256,512 model.latent_dim=16,32,64 training.batch_size=16,32,64 devices=[4] --multirun
 
-python scripts/train.py model.hidden_dim=128,256,512 model.latent_dim=16,32,64 training.batch_size=16,32,64 loss.type=distance_aware_vae devices=[5] --multirun
+python scripts/train.py \
+  model.hidden_dim=128,256,512 \
+  model.latent_dim=16,32,64 \
+  training.batch_size=16,32,64 \
+  training.loss.type=distance_aware_vae \
+  training.loss.params.beta=0.5,1.0,2.0,5.0 \
+  devices=[5] \
+  --multirun
 
+  
 python scripts/train.py \
   model=vae_attention \
   model.hidden_dim=128,256,512 \
