@@ -190,7 +190,7 @@ def list_experiments(detailed=False):
     # Print table
     headers = ["Experiment ID", "Model", "Loss Type", "Status", "Best Loss", "Epochs", "Parameters"]
     if detailed:
-        headers.extend(["MSE", "Fréchet", "KL Loss", "Total Dist MAE", "Bird Dist MAE", "Speed MSE"])
+        headers.extend(["MSE", "KL Loss", "Total Dist MAE", "Bird Dist MAE", "Speed MSE"])
     
     print("\n=== Experiments ===")
     print(tabulate(table_data, headers=headers, tablefmt="grid"))
