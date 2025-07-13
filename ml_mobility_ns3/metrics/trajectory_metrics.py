@@ -3,6 +3,10 @@ import torch
 from typing import Dict, Tuple, Union, Optional, Any
 import torch.nn.functional as F
 from abc import ABC, abstractmethod
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class TrajectoryMetrics:
     """Centralized metrics for trajectory analysis."""
@@ -42,71 +46,6 @@ class TrajectoryMetrics:
         total_distance = np.sum(segment_distances)
         
         return avg_speed, bird_distance, total_distance
-    
-    @staticmethod
-    def compute_gps_metrics_torch(trajectories: torch.Tensor, 
-                                  mask: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
-        """
-        Compute GPS metrics for batched trajectories using torch.
-        
-        Args:
-            trajectories: Tensor of shape (batch, seq_len, features) where features = [lat, lon, speed]
-            mask: Binary mask of shape (batch, seq_len)
-            
-        Returns:
-            Dictionary with metrics tensors
-        """
-        
-        batch_size, seq_len, num_features = trajectories.shape
-        device = trajectories.device
-        
-        if mask is None:
-            mask = torch.ones(batch_size, seq_len, dtype=torch.bool, device=device)
-        
-        # Extract components
-        lats = trajectories[:, :, 0]
-        lons = trajectories[:, :, 1]
-        speeds = trajectories[:, :, 2] if num_features >= 3 else torch.zeros_like(lats)
-        
-        # Average speed (considering mask)
-        speeds_masked = speeds * mask.float()
-        avg_speeds = speeds_masked.sum(dim=1) / (mask.sum(dim=1).float() + 1e-8)
-        
-        # Bird distance (first to last valid point)
-        valid_lengths = mask.sum(dim=1).long()
-        bird_distances = torch.zeros(batch_size, device=device)
-        
-        for i in range(batch_size):
-            if valid_lengths[i] > 1:
-                start_lat = lats[i, 0]
-                start_lon = lons[i, 0]
-                # Ensure end_idx is within bounds
-                end_idx = min(valid_lengths[i] - 1, seq_len - 1)
-                end_lat = lats[i, end_idx]
-                end_lon = lons[i, end_idx]
-                
-                lat_diff = end_lat - start_lat
-                lon_diff = end_lon - start_lon
-                bird_distances[i] = torch.sqrt(lat_diff**2 + lon_diff**2 + 1e-8) * 111
-        
-        # Total distance (sum of segments)
-        if seq_len > 1:
-            lat_diffs = torch.diff(lats, dim=1)
-            lon_diffs = torch.diff(lons, dim=1)
-            segment_distances = torch.sqrt(lat_diffs**2 + lon_diffs**2 + 1e-8) * 111
-            
-            # Apply mask to segments (both points must be valid)
-            seg_mask = mask[:, 1:] * mask[:, :-1]
-            segment_distances = segment_distances * seg_mask.float()
-            total_distances = segment_distances.sum(dim=1)
-        else:
-            total_distances = torch.zeros(batch_size, device=device)
-        
-        return {
-            'avg_speed': avg_speeds,
-            'bird_distance': bird_distances,
-            'total_distance': total_distances
-        }
     
     @staticmethod
     def compute_trajectory_mae(pred: torch.Tensor, target: torch.Tensor, 
@@ -196,24 +135,38 @@ class TrajectoryMetrics:
         }
 
     @staticmethod
+    def ensure_2d_mask(mask: torch.Tensor, batch_size: int, seq_len: int) -> torch.Tensor:
+        """Ensure mask is 2D (batch, seq_len)."""
+        if mask.dim() == 1:
+            # Mask contains sequence lengths
+            if mask.shape[0] == batch_size:
+                new_mask = torch.zeros(batch_size, seq_len, device=mask.device)
+                for i in range(batch_size):
+                    length = int(mask[i].item())
+                    new_mask[i, :length] = 1
+                return new_mask
+            else:
+                raise ValueError(f"1D mask shape {mask.shape} doesn't match batch_size {batch_size}")
+        elif mask.dim() == 2:
+            return mask
+        else:
+            raise ValueError(f"Unexpected mask dimensions: {mask.dim()}")
+
+    @staticmethod
     def compute_frechet_distance_torch(traj1: torch.Tensor, traj2: torch.Tensor, 
-                                     mask1: Optional[torch.Tensor] = None,
-                                     mask2: Optional[torch.Tensor] = None) -> torch.Tensor:
+                                    mask1: Optional[torch.Tensor] = None,
+                                    mask2: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Compute discrete Fréchet distance between two trajectories.
-        
-        Args:
-            traj1, traj2: Trajectories of shape (seq_len, 2) containing [lat, lon]
-            mask1, mask2: Optional masks indicating valid points
-            
-        Returns:
-            Fréchet distance as a scalar tensor
+        Uses dynamic programming algorithm.
         """
         # Extract valid points
         if mask1 is not None:
-            traj1 = traj1[mask1]
+            valid_idx1 = mask1.bool()
+            traj1 = traj1[valid_idx1]
         if mask2 is not None:
-            traj2 = traj2[mask2]
+            valid_idx2 = mask2.bool()
+            traj2 = traj2[valid_idx2]
         
         n = len(traj1)
         m = len(traj2)
@@ -221,14 +174,17 @@ class TrajectoryMetrics:
         if n == 0 or m == 0:
             return torch.tensor(0.0, device=traj1.device)
         
-        # Compute pairwise distances
-        # Convert to lat/lon distances in km
+        # Only use lat/lon (first 2 dimensions)
+        traj1 = traj1[:, :2]
+        traj2 = traj2[:, :2]
+        
+        # Compute pairwise Euclidean distances (already scaled)
         traj1_expanded = traj1.unsqueeze(1)  # (n, 1, 2)
         traj2_expanded = traj2.unsqueeze(0)  # (1, m, 2)
-        dists = torch.norm(traj1_expanded - traj2_expanded, dim=2) * 111  # Rough km conversion
+        dists = torch.norm(traj1_expanded - traj2_expanded, dim=2)
         
-        # Dynamic programming for Fréchet distance
-        dp = torch.full((n, m), float('inf'), device=traj1.device)
+        # Dynamic programming
+        dp = torch.full((n, m), float('inf'), device=traj1.device, dtype=torch.float32)
         dp[0, 0] = dists[0, 0]
         
         # Fill first row and column
@@ -237,7 +193,7 @@ class TrajectoryMetrics:
         for j in range(1, m):
             dp[0, j] = torch.max(dp[0, j-1], dists[0, j])
         
-        # Fill the rest
+        # Fill the rest of the matrix
         for i in range(1, n):
             for j in range(1, m):
                 dp[i, j] = torch.max(
@@ -246,51 +202,30 @@ class TrajectoryMetrics:
                 )
         
         return dp[n-1, m-1]
-    
+
     @staticmethod
     def compute_comprehensive_metrics(pred: torch.Tensor, target: torch.Tensor, 
                                     mask: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
         Compute comprehensive set of metrics for trajectory comparison.
-        
-        Args:
-            pred: Predicted trajectories (batch, seq_len, features)
-            target: Target trajectories (batch, seq_len, features)
-            mask: Binary mask (batch, seq_len)
-            
-        Returns:
-            Dictionary of metrics
         """
-        
         batch_size, seq_len, num_features = pred.shape
         device = pred.device
         
-        # Ensure mask has correct shape
-        if mask.dim() == 1:
-            # If mask is 1D, it might be a length tensor
-            print(f"Warning: mask is 1D with shape {mask.shape}, expected 2D")
-            # Create a proper 2D mask
-            if mask.shape[0] == batch_size:
-                # mask contains lengths for each sequence
-                new_mask = torch.zeros(batch_size, seq_len, device=device)
-                for i in range(batch_size):
-                    length = int(mask[i].item())
-                    new_mask[i, :length] = 1
-                mask = new_mask
-            else:
-                raise ValueError(f"Unexpected mask shape: {mask.shape}")
+        # Ensure mask is 2D
+        mask = TrajectoryMetrics.ensure_2d_mask(mask, batch_size, seq_len)
         
         # Basic MSE
         mask_expanded = mask.unsqueeze(-1).expand_as(pred)
         mse = ((pred - target) ** 2 * mask_expanded).sum() / (mask_expanded.sum() + 1e-8)
         
-        # Speed MSE (3rd dimension)
+        # Speed MSE (3rd dimension if available)
         if num_features >= 3:
             speed_mse = ((pred[:, :, 2] - target[:, :, 2]) ** 2 * mask).sum() / (mask.sum() + 1e-8)
         else:
             speed_mse = torch.tensor(0.0, device=device)
         
-        # Try to compute GPS metrics with error handling
+        # GPS metrics
         try:
             pred_metrics = TrajectoryMetrics.compute_gps_metrics_torch(pred, mask)
             target_metrics = TrajectoryMetrics.compute_gps_metrics_torch(target, mask)
@@ -298,12 +233,23 @@ class TrajectoryMetrics:
             total_dist_mae = torch.abs(pred_metrics['total_distance'] - target_metrics['total_distance']).mean()
             bird_dist_mae = torch.abs(pred_metrics['bird_distance'] - target_metrics['bird_distance']).mean()
         except Exception as e:
-            print(f"Error computing GPS metrics: {e}")
+            logger.warning(f"Error computing GPS metrics: {e}")
             total_dist_mae = torch.tensor(0.0, device=device)
             bird_dist_mae = torch.tensor(0.0, device=device)
         
-        # Skip Fréchet distance for now to isolate the issue
-        avg_frechet = torch.tensor(0.0, device=device)
+        # Compute Fréchet distance for each sequence in batch
+        frechet_distances = []
+        for i in range(batch_size):
+            try:
+                fd = TrajectoryMetrics.compute_frechet_distance_torch(
+                    pred[i], target[i], mask[i], mask[i]
+                )
+                frechet_distances.append(fd)
+            except Exception as e:
+                logger.warning(f"Error computing Fréchet distance for sequence {i}: {e}")
+                frechet_distances.append(torch.tensor(0.0, device=device))
+        
+        avg_frechet = torch.stack(frechet_distances).mean() if frechet_distances else torch.tensor(0.0, device=device)
         
         return {
             'mse': mse,
@@ -311,6 +257,64 @@ class TrajectoryMetrics:
             'total_distance_mae': total_dist_mae,
             'bird_distance_mae': bird_dist_mae,
             'frechet_distance': avg_frechet
+        }
+
+    @staticmethod
+    def compute_gps_metrics_torch(trajectories: torch.Tensor, 
+                                mask: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+        """
+        Compute GPS metrics for batched trajectories.
+        Fixed to handle scaled GPS coordinates properly.
+        """
+        batch_size, seq_len, num_features = trajectories.shape
+        device = trajectories.device
+        
+        if mask is None:
+            mask = torch.ones(batch_size, seq_len, device=device)
+        else:
+            mask = TrajectoryMetrics.ensure_2d_mask(mask, batch_size, seq_len)
+        
+        # Extract components
+        lats = trajectories[:, :, 0]
+        lons = trajectories[:, :, 1]
+        speeds = trajectories[:, :, 2] if num_features >= 3 else torch.zeros_like(lats)
+        
+        # Average speed
+        speeds_masked = speeds * mask
+        avg_speeds = speeds_masked.sum(dim=1) / (mask.sum(dim=1) + 1e-8)
+        
+        # Bird distance (Euclidean between first and last valid points)
+        valid_lengths = mask.sum(dim=1).long()
+        bird_distances = torch.zeros(batch_size, device=device)
+        
+        for i in range(batch_size):
+            if valid_lengths[i] > 1:
+                last_idx = valid_lengths[i] - 1
+                # Simple Euclidean distance (already scaled)
+                bird_distances[i] = torch.sqrt(
+                    (lats[i, last_idx] - lats[i, 0])**2 + 
+                    (lons[i, last_idx] - lons[i, 0])**2 + 1e-8
+                )
+        
+        # Total distance (sum of segments)
+        total_distances = torch.zeros(batch_size, device=device)
+        if seq_len > 1:
+            for i in range(batch_size):
+                if valid_lengths[i] > 1:
+                    # Compute distances between consecutive valid points
+                    valid_len = valid_lengths[i]
+                    lat_seq = lats[i, :valid_len]
+                    lon_seq = lons[i, :valid_len]
+                    
+                    lat_diffs = torch.diff(lat_seq)
+                    lon_diffs = torch.diff(lon_seq)
+                    segment_distances = torch.sqrt(lat_diffs**2 + lon_diffs**2 + 1e-8)
+                    total_distances[i] = segment_distances.sum()
+        
+        return {
+            'avg_speed': avg_speeds,
+            'bird_distance': bird_distances,
+            'total_distance': total_distances
         }
 
 # Convenience functions for backward compatibility

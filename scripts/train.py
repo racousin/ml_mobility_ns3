@@ -11,6 +11,7 @@ import logging
 import json
 from datetime import datetime
 import shutil
+from ml_mobility_ns3.training.callbacks import BestMetricsTracker
 
 sys.path.append(str(Path(__file__).parent.parent))
 from ml_mobility_ns3.data.dataset import TrajectoryDataset
@@ -18,9 +19,16 @@ from ml_mobility_ns3.training.lightning_module import TrajectoryLightningModule
 from torch.utils.data import DataLoader, random_split
 
 
-def create_experiment_id(model_name: str) -> str:
-    """Create unique experiment ID."""
+def create_experiment_id(model_name: str, cfg: DictConfig) -> str:
+    """Create unique experiment ID with hydra job info."""
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    
+    # Add hydra job number if in multirun
+    if hasattr(cfg, 'hydra') and 'job' in cfg.hydra:
+        job_num = cfg.hydra.job.num
+        job_id = cfg.hydra.job.id
+        return f"{model_name}_{timestamp}_job{job_num}_{job_id}"
+    
     return f"{model_name}_{timestamp}"
 
 
@@ -37,6 +45,9 @@ def setup_experiment_dir(experiment_id: str, cfg: DictConfig) -> Path:
     with open(exp_dir / "config.yaml", "w") as f:
         OmegaConf.save(cfg, f)
     
+    # Get loss configuration
+    loss_config = cfg.training.get('loss', {'type': 'simple_vae', 'params': {'beta': 1.0}})
+    
     # Create model info
     model_info = {
         "experiment_id": experiment_id,
@@ -45,7 +56,9 @@ def setup_experiment_dir(experiment_id: str, cfg: DictConfig) -> Path:
         "created_at": datetime.now().isoformat(),
         "status": "training",
         "architecture": OmegaConf.to_container(cfg.model),
-        "training_config": OmegaConf.to_container(cfg.training)
+        "training_config": OmegaConf.to_container(cfg.training),
+        "loss_config": OmegaConf.to_container(loss_config),  # Add this
+        "hydra_config": OmegaConf.to_container(cfg.hydra) if hasattr(cfg, 'hydra') else None
     }
     
     with open(exp_dir / "model_info.json", "w") as f:
@@ -94,7 +107,7 @@ def update_manifest(experiment_id: str, model_type: str, status: str = "training
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
     logger = logging.getLogger(__name__)
-    
+    metrics_tracker = BestMetricsTracker(exp_dir)
     # Create experiment ID and directory
     experiment_id = create_experiment_id(cfg.model.name)
     exp_dir = setup_experiment_dir(experiment_id, cfg)
@@ -191,14 +204,14 @@ def main(cfg: DictConfig):
         max_epochs=cfg.training.epochs,
         accelerator=cfg.accelerator,
         devices=cfg.devices,
-        callbacks=[checkpoint_callback, early_stopping],
+        callbacks=[checkpoint_callback, early_stopping, metrics_tracker],
         logger=tb_logger,
         gradient_clip_val=cfg.training.gradient_clip,
         log_every_n_steps=10,
         val_check_interval=1.0,
         enable_progress_bar=True,
         enable_model_summary=True,
-        default_root_dir=exp_dir  # Set experiment dir as root
+        default_root_dir=exp_dir
     )
     
     try:
@@ -223,12 +236,20 @@ def main(cfg: DictConfig):
         # Update experiment status
         status = "completed"
         
-        # Get final metrics
+        # Get final metrics from metrics tracker
+        best_metrics_file = exp_dir / "best_metrics.json"
+        if best_metrics_file.exists():
+            with open(best_metrics_file, "r") as f:
+                best_metrics = json.load(f)
+        else:
+            best_metrics = metrics_tracker.best_metrics
+        
         final_metrics = {
-            "best_val_loss": float(checkpoint_callback.best_model_score) if checkpoint_callback.best_model_score is not None else None,
+            "best_val_loss": best_metrics.get('val_loss'),
             "epochs_trained": trainer.current_epoch + 1,
-            "best_epoch": int(best_checkpoint.stem.split('epoch=')[1].split('_')[0]) if checkpoint_callback.best_model_path else None
-            }
+            "best_epoch": best_metrics.get('epoch'),
+            "best_metrics": best_metrics  # Include all best metrics
+        }
         
     except Exception as e:
         logger.error(f"Training failed: {e}")

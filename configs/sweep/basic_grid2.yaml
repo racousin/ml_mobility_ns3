@@ -1,0 +1,31 @@
+# @package _global_
+defaults:
+  - override /hydra/sweeper: basic
+  - override /hydra/launcher: joblib
+
+accelerator: gpu
+
+hydra:
+  launcher:
+    n_jobs: 2
+  sweeper:
+    params:
+      devices: "[2]","[3]"
+      model.hidden_dim: 128,256,512
+      model.latent_dim: 16,32,64
+      training.batch_size: 16,32,64,128
+      loss.params.beta: 0.5,1.0,2.0
+      loss.type: distance_aware_vae
+
+# Run all in parallel (each on different GPU)
+python scripts/train.py model.hidden_dim=128,256,512 model.latent_dim=16,32,64 training.batch_size=16,32,64 devices=[4] --multirun
+
+python scripts/train.py model.hidden_dim=128,256,512 model.latent_dim=16,32,64 training.batch_size=16,32,64 loss.type=distance_aware_vae devices=[5] --multirun
+
+python scripts/train.py model.hidden_dim=64,128,256 model.latent_dim=8,16,32 training.learning_rate=0.0001,0.001,0.01 devices=[1] --multirun
+
+python scripts/train.py training.batch_size=8,16,32,64 training.learning_rate=0.0001,0.0005,0.001 devices=[2] --multirun
+
+python scripts/train.py loss.params.beta=0.1,0.5,1.0,2.0,5.0 model.hidden_dim=128,256 devices=[6] --multirun
+
+wait  # Wait for all background jobs to complete
