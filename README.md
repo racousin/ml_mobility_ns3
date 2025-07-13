@@ -25,7 +25,7 @@ python scripts/train.py model=vae_lstm training.epochs=100
 
 ### List Experiments
 ```bash
-python scripts/list_experiments.py --detailed
+python scripts/list_experiments.py
 ```
 
 ### Evaluation

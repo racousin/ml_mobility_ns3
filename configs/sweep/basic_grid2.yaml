@@ -22,10 +22,27 @@ python scripts/train.py model.hidden_dim=128,256,512 model.latent_dim=16,32,64 t
 
 python scripts/train.py model.hidden_dim=128,256,512 model.latent_dim=16,32,64 training.batch_size=16,32,64 loss.type=distance_aware_vae devices=[5] --multirun
 
-python scripts/train.py model.hidden_dim=64,128,256 model.latent_dim=8,16,32 training.learning_rate=0.0001,0.001,0.01 devices=[1] --multirun
+python scripts/train.py \
+  model=vae_lstm_attention \
+  model.hidden_dim=128,256,512 \
+  model.latent_dim=16,32,64 \
+  model.num_attention_heads=4,8 \
+  model.num_attention_layers=1,2 \
+  training.batch_size=16,32 \
+  devices=[6] \
+  --multirun
 
-python scripts/train.py training.batch_size=8,16,32,64 training.learning_rate=0.0001,0.0005,0.001 devices=[2] --multirun
-
-python scripts/train.py loss.params.beta=0.1,0.5,1.0,2.0,5.0 model.hidden_dim=128,256 devices=[6] --multirun
-
-wait  # Wait for all background jobs to complete
+# Attention Model Sweep 2: Heavy Attention Architecture  
+# Test more complex attention with distance-aware loss
+python scripts/train.py \
+  model=vae_lstm_attention \
+  model.hidden_dim=256,512 \
+  model.latent_dim=32,64 \
+  model.num_attention_heads=8,16 \
+  model.num_attention_layers=2,3 \
+  model.dropout=0.1,0.2 \
+  training.batch_size=16,32 \
+  training.learning_rate=1e-4,5e-4 \
+  loss.type=distance_aware_vae \
+  devices=[7] \
+  --multirun
