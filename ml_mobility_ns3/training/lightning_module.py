@@ -36,12 +36,12 @@ class TrajectoryLightningModule(pl.LightningModule):
             logger.error(f"Failed to instantiate model: {e}")
             raise
         
-        # Create loss function from config
-        loss_config = config.training.get('loss', {'type': 'simple_vae', 'params': {'beta': 1.0}})
-        self.loss_fn = create_loss(loss_config)
-        logger.info(f"Using loss function: {loss_config['type']}")
+        # Create loss function from config - now from training.loss
+        loss_config = config.training.loss
+        self.loss_fn = create_loss(OmegaConf.to_container(loss_config))
+        logger.info(f"Using loss function: {loss_config.type}")
         
-        # Backward compatibility
+        # Backward compatibility (can be removed if not needed)
         self.beta = config.training.get('beta', 1.0)
         self.lambda_dist = config.training.get('lambda_dist', 0.5)
         

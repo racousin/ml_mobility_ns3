@@ -45,9 +45,6 @@ def setup_experiment_dir(experiment_id: str, cfg: DictConfig) -> Path:
     with open(exp_dir / "config.yaml", "w") as f:
         OmegaConf.save(cfg, f)
     
-    # Get loss configuration
-    loss_config = cfg.training.get('loss', {'type': 'simple_vae', 'params': {'beta': 1.0}})
-    
     # Create model info
     model_info = {
         "experiment_id": experiment_id,
@@ -57,7 +54,6 @@ def setup_experiment_dir(experiment_id: str, cfg: DictConfig) -> Path:
         "status": "training",
         "architecture": OmegaConf.to_container(cfg.model),
         "training_config": OmegaConf.to_container(cfg.training),
-        "loss_config": OmegaConf.to_container(loss_config),  # Add this
         "hydra_config": OmegaConf.to_container(cfg.hydra) if hasattr(cfg, 'hydra') else None
     }
     

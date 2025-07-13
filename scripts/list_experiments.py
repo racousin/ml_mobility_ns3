@@ -5,6 +5,7 @@ from tabulate import tabulate
 import sys
 import pandas as pd
 import math
+import yaml
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -129,14 +130,16 @@ def list_experiments(detailed=False):
             
             # Get loss type
             loss_type = "simple_vae"
-            if 'loss_config' in model_info:
-                loss_type = model_info['loss_config'].get('type', 'simple_vae')
+            if 'training_config' in model_info and 'loss' in model_info['training_config']:
+                loss_config = model_info['training_config']['loss']
+                if isinstance(loss_config, dict):
+                    loss_type = loss_config.get('type', 'simple_vae')
             else:
                 # Fallback to config file
                 config_path = exp_dir / "config.yaml"
                 if config_path.exists():
                     try:
-                        import yaml
+                        
                         with open(config_path, "r") as f:
                             config = yaml.safe_load(f)
                             loss_config = config.get("training", {}).get("loss", {})
