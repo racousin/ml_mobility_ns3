@@ -1,8 +1,8 @@
-# ml_mobility_ns3/training/lightning_module.py
+# ml_mobility_ns3/training/lightning_module_cleaned.py
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 import logging
@@ -14,46 +14,56 @@ logger = logging.getLogger(__name__)
 
 
 class TrajectoryLightningModule(pl.LightningModule):
+    """Lightning module for trajectory generation models."""
+    
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.save_hyperparameters()
         
-        # Save the model config specifically
-        self.model_config = OmegaConf.to_container(config.model)
+        # Initialize model
+        self._init_model()
         
-        # Instantiate model with error handling
+        # Initialize loss function
+        self._init_loss()
+        
+        # Initialize metrics
+        self.metrics = TrajectoryMetrics()
+        
+        # For validation epoch aggregation
+        self._validation_outputs = []
+        
+    def _init_model(self):
+        """Initialize the model with error handling."""
         try:
-            self.model = instantiate(config.model)
-            logger.info(f"Successfully instantiated model: {config.model.name}")
+            self.model = instantiate(self.config.model)
+            logger.info(f"Successfully instantiated model: {self.config.model.name}")
             
             # Verify model has parameters
             param_count = sum(p.numel() for p in self.model.parameters())
             if param_count == 0:
-                raise ValueError(f"Model {config.model.name} has no learnable parameters")
+                raise ValueError(f"Model {self.config.model.name} has no learnable parameters")
             logger.info(f"Model has {param_count:,} parameters")
             
         except Exception as e:
             logger.error(f"Failed to instantiate model: {e}")
             raise
-        
-        # Create loss function from config - now from training.loss
-        loss_config = config.training.loss
+    
+    def _init_loss(self):
+        """Initialize loss function from config."""
+        loss_config = self.config.training.loss
         self.loss_fn = create_loss(OmegaConf.to_container(loss_config))
         logger.info(f"Using loss function: {loss_config.type}")
-        
-        # Backward compatibility (can be removed if not needed)
-        self.beta = config.training.get('beta', 1.0)
-        self.lambda_dist = config.training.get('lambda_dist', 0.5)
-        
-        self.metrics = TrajectoryMetrics()
-        self.save_hyperparameters()
-        
+    
     def forward(self, x, transport_mode, length, mask=None):
+        """Forward pass through the model."""
         return self.model(x, transport_mode, length, mask)
     
-    def compute_loss(self, batch, outputs):
+    def _prepare_batch(self, batch: Tuple) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Prepare batch data and ensure mask has correct dimensions."""
         x, mask, transport_mode, length = batch
         
+        # Fix mask dimensions if needed
         if mask.dim() == 1:
             batch_size, seq_len, _ = x.shape
             new_mask = torch.zeros(batch_size, seq_len, device=x.device)
@@ -61,6 +71,13 @@ class TrajectoryLightningModule(pl.LightningModule):
                 valid_len = int(mask[i].item())
                 new_mask[i, :valid_len] = 1.0
             mask = new_mask
+        
+        return x, mask, transport_mode, length
+    
+    def _compute_loss(self, outputs: Dict, batch: Tuple) -> Tuple[torch.Tensor, Dict]:
+        """Compute loss using configured loss function."""
+        x, mask, transport_mode, length = self._prepare_batch(batch)
+        
         # Prepare targets dict
         targets = {
             'x': x,
@@ -68,94 +85,111 @@ class TrajectoryLightningModule(pl.LightningModule):
             'length': length
         }
         
-        # Compute loss using configured loss function
+        # Compute loss
         loss_dict = self.loss_fn(outputs, targets, mask)
         
         return loss_dict['total'], loss_dict
     
-    def compute_standard_metrics(self, pred, target, mask):
-        """Compute standardized metrics for all models."""
-        return self.metrics.compute_comprehensive_metrics(pred, target, mask)
+    def _compute_metrics(self, outputs: Dict, batch: Tuple) -> Dict[str, torch.Tensor]:
+        """Compute standardized metrics."""
+        x, mask, _, _ = self._prepare_batch(batch)
+        return self.metrics.compute_comprehensive_metrics(outputs['recon'], x, mask)
     
-    def training_step(self, batch, batch_idx):
-        x, mask, transport_mode, length = batch
-        outputs = self.forward(x, transport_mode, length, mask)
-        loss, loss_components = self.compute_loss(batch, outputs)
-        
-        # Compute standardized metrics
-        std_metrics = self.compute_standard_metrics(outputs['recon'], batch[0], batch[1])
+    def _log_metrics(self, loss: torch.Tensor, loss_components: Dict, 
+                    metrics: Dict, prefix: str = 'train'):
+        """Log all metrics with proper prefix."""
+        # Log main loss
+        self.log(f'{prefix}_loss', loss, prog_bar=True)
         
         # Log loss components
-        self.log('train_loss', loss, prog_bar=True)
         for key, value in loss_components.items():
             if key != 'total':
-                self.log(f'train_{key}', value)
+                self.log(f'{prefix}_{key}', value)
         
         # Log standardized metrics
-        for key, value in std_metrics.items():
-            self.log(f'train_{key}', value)
+        for key, value in metrics.items():
+            self.log(f'{prefix}_{key}', value)
+    
+    def training_step(self, batch, batch_idx):
+        """Training step."""
+        x, mask, transport_mode, length = self._prepare_batch(batch)
+        
+        # Forward pass
+        outputs = self.forward(x, transport_mode, length, mask)
+        
+        # Compute loss
+        loss, loss_components = self._compute_loss(outputs, batch)
+        
+        # Compute metrics
+        metrics = self._compute_metrics(outputs, batch)
+        
+        # Log everything
+        self._log_metrics(loss, loss_components, metrics, prefix='train')
         
         return loss
     
     def validation_step(self, batch, batch_idx):
+        """Validation step."""
+        x, mask, transport_mode, length = self._prepare_batch(batch)
         
-        x, mask, transport_mode, length = batch
+        # Forward pass
         outputs = self.forward(x, transport_mode, length, mask)
-        loss, loss_components = self.compute_loss(batch, outputs)
         
-        # Compute standardized metrics
-        std_metrics = self.compute_standard_metrics(outputs['recon'], batch[0], batch[1])
+        # Compute loss
+        loss, loss_components = self._compute_loss(outputs, batch)
         
-        # Log loss components
-        self.log('val_loss', loss, prog_bar=True)
-        for key, value in loss_components.items():
-            if key != 'total':
-                self.log(f'val_{key}', value)
+        # Compute metrics
+        metrics = self._compute_metrics(outputs, batch)
         
-        # Log standardized metrics - these are the key metrics for comparison
-        for key, value in std_metrics.items():
-            self.log(f'val_{key}', value)
+        # Log everything
+        self._log_metrics(loss, loss_components, metrics, prefix='val')
         
-        # Store metrics for epoch end summary
-        self.validation_step_outputs = getattr(self, 'validation_step_outputs', [])
-        self.validation_step_outputs.append({
+        # Store for epoch end aggregation
+        self._validation_outputs.append({
             'loss': loss,
-            'metrics': std_metrics
+            'metrics': metrics
         })
         
         return loss
     
     def on_validation_epoch_end(self):
-        """Log epoch-level summaries of key metrics."""
-        if hasattr(self, 'validation_step_outputs') and self.validation_step_outputs:
-            # Aggregate key metrics
-            avg_metrics = {}
-            metric_keys = ['mse', 'speed_mse', 'total_distance_mae', 'bird_distance_mae']
-            
-            for key in metric_keys:
-                values = [out['metrics'][key].item() for out in self.validation_step_outputs 
-                         if key in out['metrics']]
-                if values:
-                    avg_metrics[key] = sum(values) / len(values)
-            
-            # Log summary
-            self.log('val_epoch_mse', avg_metrics.get('mse', 0), prog_bar=True)
-            
-            # Clear outputs
-            self.validation_step_outputs.clear()
+        """Aggregate validation metrics at epoch end."""
+        if not self._validation_outputs:
+            return
+        
+        # Define key metrics to aggregate
+        key_metrics = ['mse', 'speed_mse', 'total_distance_mae', 'bird_distance_mae']
+        
+        # Aggregate metrics
+        avg_metrics = {}
+        for key in key_metrics:
+            values = [out['metrics'][key].item() for out in self._validation_outputs 
+                     if key in out['metrics']]
+            if values:
+                avg_metrics[key] = sum(values) / len(values)
+        
+        # Log epoch summary
+        if 'mse' in avg_metrics:
+            self.log('val_epoch_mse', avg_metrics['mse'], prog_bar=True)
+        
+        # Clear outputs for next epoch
+        self._validation_outputs.clear()
     
     def configure_optimizers(self):
+        """Configure optimizer and scheduler."""
         # Check if model has parameters
         params = list(self.model.parameters())
         if not params:
             raise ValueError("Model has no parameters to optimize")
         
+        # Create optimizer
         optimizer = torch.optim.AdamW(
             params,
             lr=self.config.training.learning_rate,
-            weight_decay=1e-5
+            weight_decay=self.config.training.get('weight_decay', 1e-5)
         )
         
+        # Create scheduler
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode='min',
