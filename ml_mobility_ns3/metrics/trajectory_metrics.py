@@ -186,26 +186,11 @@ class TrajectoryMetrics:
             total_dist_mae = torch.tensor(0.0, device=device)
             bird_dist_mae = torch.tensor(0.0, device=device)
         
-        # Compute Fréchet distance for each sequence in batch
-        frechet_distances = []
-        for i in range(batch_size):
-            try:
-                fd = TrajectoryMetrics.compute_frechet_distance_torch(
-                    pred[i], target[i], mask[i], mask[i]
-                )
-                frechet_distances.append(fd)
-            except Exception as e:
-                logger.warning(f"Error computing Fréchet distance for sequence {i}: {e}")
-                frechet_distances.append(torch.tensor(0.0, device=device))
-        
-        avg_frechet = torch.stack(frechet_distances).mean() if frechet_distances else torch.tensor(0.0, device=device)
-        
         return {
             'mse': mse,
             'speed_mse': speed_mse,
             'total_distance_mae': total_dist_mae,
             'bird_distance_mae': bird_dist_mae,
-            'frechet_distance': avg_frechet
         }
 
     @staticmethod
