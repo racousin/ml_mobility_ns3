@@ -71,7 +71,7 @@ class TrajectoryEvaluator:
         # Standardized metrics
         if all_std_metrics:
             std_keys = ['mse', 'speed_mse', 'total_distance_mae', 
-                       'bird_distance_mae', 'frechet_distance']
+                       'bird_distance_mae', 'kl_loss']
             for key in std_keys:
                 values = [m[key] for m in all_std_metrics if key in m]
                 if values:

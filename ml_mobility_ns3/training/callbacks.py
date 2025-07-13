@@ -35,7 +35,7 @@ class BestMetricsTracker(Callback):
             metric_keys = [
                 'val_loss', 'val_recon_loss', 'val_kl_loss', 'val_weighted_kl_loss',
                 'val_mse', 'val_speed_mse', 'val_total_distance_mae', 
-                'val_bird_distance_mae', 'val_frechet_distance',
+                'val_bird_distance_mae',
                 'val_distance_loss', 'val_speed_loss', 'val_smoothness_loss'
             ]
             
@@ -79,7 +79,6 @@ class BestMetricsTracker(Callback):
             model_info['key_metrics'] = {
                 'best_val_loss': self.best_metrics.get('val_loss'),
                 'best_mse': self.best_metrics.get('val_mse'),
-                'best_frechet': self.best_metrics.get('val_frechet_distance'),
                 'best_kl_loss': self.best_metrics.get('val_kl_loss'),
                 'best_total_distance_mae': self.best_metrics.get('val_total_distance_mae'),
                 'best_bird_distance_mae': self.best_metrics.get('val_bird_distance_mae'),

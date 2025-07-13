@@ -153,57 +153,6 @@ class TrajectoryMetrics:
             raise ValueError(f"Unexpected mask dimensions: {mask.dim()}")
 
     @staticmethod
-    def compute_frechet_distance_torch(traj1: torch.Tensor, traj2: torch.Tensor, 
-                                    mask1: Optional[torch.Tensor] = None,
-                                    mask2: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Compute discrete Fréchet distance between two trajectories.
-        Uses dynamic programming algorithm.
-        """
-        # Extract valid points
-        if mask1 is not None:
-            valid_idx1 = mask1.bool()
-            traj1 = traj1[valid_idx1]
-        if mask2 is not None:
-            valid_idx2 = mask2.bool()
-            traj2 = traj2[valid_idx2]
-        
-        n = len(traj1)
-        m = len(traj2)
-        
-        if n == 0 or m == 0:
-            return torch.tensor(0.0, device=traj1.device)
-        
-        # Only use lat/lon (first 2 dimensions)
-        traj1 = traj1[:, :2]
-        traj2 = traj2[:, :2]
-        
-        # Compute pairwise Euclidean distances (already scaled)
-        traj1_expanded = traj1.unsqueeze(1)  # (n, 1, 2)
-        traj2_expanded = traj2.unsqueeze(0)  # (1, m, 2)
-        dists = torch.norm(traj1_expanded - traj2_expanded, dim=2)
-        
-        # Dynamic programming
-        dp = torch.full((n, m), float('inf'), device=traj1.device, dtype=torch.float32)
-        dp[0, 0] = dists[0, 0]
-        
-        # Fill first row and column
-        for i in range(1, n):
-            dp[i, 0] = torch.max(dp[i-1, 0], dists[i, 0])
-        for j in range(1, m):
-            dp[0, j] = torch.max(dp[0, j-1], dists[0, j])
-        
-        # Fill the rest of the matrix
-        for i in range(1, n):
-            for j in range(1, m):
-                dp[i, j] = torch.max(
-                    torch.min(torch.stack([dp[i-1, j], dp[i, j-1], dp[i-1, j-1]])),
-                    dists[i, j]
-                )
-        
-        return dp[n-1, m-1]
-
-    @staticmethod
     def compute_comprehensive_metrics(pred: torch.Tensor, target: torch.Tensor, 
                                     mask: torch.Tensor) -> Dict[str, torch.Tensor]:
         """

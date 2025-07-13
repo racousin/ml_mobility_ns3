@@ -80,7 +80,7 @@ def load_tensorboard_metrics(exp_dir: Path) -> dict:
                 # Get final validation metrics
                 metric_names = [
                     'val_mse', 'val_speed_mse', 'val_total_distance_mae', 
-                    'val_bird_distance_mae', 'val_frechet_distance'
+                    'val_bird_distance_mae'
                 ]
                 
                 for metric in metric_names:
@@ -165,7 +165,6 @@ def list_experiments(detailed=False):
                 # Add detailed metrics
                 row.extend([
                     format_metric_value(metrics.get('val_mse')),
-                    format_metric_value(metrics.get('val_frechet_distance')),
                     format_metric_value(metrics.get('val_kl_loss')),
                     format_metric_value(metrics.get('val_total_distance_mae')),
                     format_metric_value(metrics.get('val_bird_distance_mae')),
@@ -204,7 +203,6 @@ def list_experiments(detailed=False):
         metrics_to_minimize = {
             'val_loss': 'Validation Loss',
             'val_mse': 'MSE',
-            'val_frechet_distance': 'Fréchet Distance',
             'val_kl_loss': 'KL Loss',
             'val_total_distance_mae': 'Total Distance MAE',
             'val_bird_distance_mae': 'Bird Distance MAE',

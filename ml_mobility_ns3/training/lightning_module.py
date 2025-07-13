@@ -130,7 +130,7 @@ class TrajectoryLightningModule(pl.LightningModule):
         if hasattr(self, 'validation_step_outputs') and self.validation_step_outputs:
             # Aggregate key metrics
             avg_metrics = {}
-            metric_keys = ['mse', 'speed_mse', 'total_distance_mae', 'bird_distance_mae', 'frechet_distance']
+            metric_keys = ['mse', 'speed_mse', 'total_distance_mae', 'bird_distance_mae']
             
             for key in metric_keys:
                 values = [out['metrics'][key].item() for out in self.validation_step_outputs 
@@ -140,7 +140,6 @@ class TrajectoryLightningModule(pl.LightningModule):
             
             # Log summary
             self.log('val_epoch_mse', avg_metrics.get('mse', 0), prog_bar=True)
-            self.log('val_epoch_frechet', avg_metrics.get('frechet_distance', 0), prog_bar=True)
             
             # Clear outputs
             self.validation_step_outputs.clear()
