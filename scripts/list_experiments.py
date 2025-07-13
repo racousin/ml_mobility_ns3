@@ -40,10 +40,6 @@ def load_experiment_metrics(exp_dir: Path) -> dict:
                 if 'best_val_loss' in final and 'val_loss' not in metrics:
                     metrics['val_loss'] = final['best_val_loss']
     
-    # Fallback to tensorboard if needed
-    if not metrics:
-        metrics = load_tensorboard_metrics(exp_dir)
-    
     return metrics
 
 
@@ -54,47 +50,6 @@ def format_metric_value(value, decimals=4):
     if isinstance(value, (int, float)):
         return f"{value:.{decimals}f}"
     return str(value)
-
-def load_tensorboard_metrics(exp_dir: Path) -> dict:
-    """Load metrics from tensorboard logs if available."""
-    tb_dir = exp_dir / "logs" / "tensorboard"
-    metrics = {}
-    
-    try:
-        # Try to load from event files using tensorboard
-        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
-        
-        version_dirs = [d for d in tb_dir.iterdir() if d.is_dir()] if tb_dir.exists() else []
-        if not version_dirs:
-            # Check direct event files
-            event_files = list(tb_dir.glob("events.out.tfevents.*")) if tb_dir.exists() else []
-            if event_files:
-                version_dirs = [tb_dir]
-        
-        for version_dir in version_dirs:
-            event_files = list(version_dir.glob("events.out.tfevents.*"))
-            if event_files:
-                ea = EventAccumulator(str(version_dir))
-                ea.Reload()
-                
-                # Get final validation metrics
-                metric_names = [
-                    'val_mse', 'val_speed_mse', 'val_total_distance_mae', 
-                    'val_bird_distance_mae'
-                ]
-                
-                for metric in metric_names:
-                    if metric in ea.scalars.Keys():
-                        values = ea.scalars.Items(metric)
-                        if values:
-                            # Get the last value
-                            metrics[metric] = values[-1].value
-                
-                break  # Use first valid version
-    except Exception as e:
-        pass  # Silently fail if tensorboard not available
-    
-    return metrics
 
 
 def list_experiments(detailed=False):

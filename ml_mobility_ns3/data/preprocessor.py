@@ -8,7 +8,7 @@ from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from typing import Dict, Tuple, List
 import logging
 
-from ..metrics.trajectory_metrics import TrajectoryMetrics
+from ml_mobility_ns3.metrics.stat_metrics import StatMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class TrajectoryPreprocessor:
         
         self.filtering_stats = []
         self.scalers = {}
-        self.metrics = TrajectoryMetrics()
+        self.metrics = StatMetrics()
         
     def process(self) -> Dict:
         """Run the complete preprocessing pipeline."""

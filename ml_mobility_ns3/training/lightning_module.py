@@ -7,7 +7,7 @@ from hydra.utils import instantiate
 from omegaconf import OmegaConf
 import logging
 
-from ..metrics.trajectory_metrics import TrajectoryMetrics
+from ml_mobility_ns3.metrics.stat_metrics import DiffMetrics
 from .losses import create_loss
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class TrajectoryLightningModule(pl.LightningModule):
         self._init_loss()
         
         # Initialize metrics
-        self.metrics = TrajectoryMetrics()
+        self.metrics = DiffMetrics()
         
         # For validation epoch aggregation
         self._validation_outputs = []

@@ -7,7 +7,7 @@ import logging
 from tqdm import tqdm
 import inspect
 
-from ml_mobility_ns3.metrics.trajectory_metrics import TrajectoryMetrics
+from ml_mobility_ns3.metrics.stat_metrics import StatMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +16,9 @@ class TrajectoryEvaluator:
     def __init__(self, model, config):
         self.model = model
         self.config = config
-        self.device = config.device if config.device != 'cuda' else 'cpu'  # Use CPU for evaluation
+        self.device = config.device if config.device != 'cuda' else 'cpu'
         self.model = self.model.to(self.device)
-        self.metrics = TrajectoryMetrics()
+        self.metrics = StatMetrics()
         
         # Check what arguments the model's forward method accepts
         self.model_forward_sig = inspect.signature(self.model.forward)
