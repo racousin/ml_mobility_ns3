@@ -141,7 +141,7 @@ class DiffMetrics:
             'total_distance_mae': total_distance_mae.item(),
             'bird_distance_mae': bird_distance_mae.item()
         }
-    
+
     def compute_comprehensive_metrics(self, pred: torch.Tensor, target: torch.Tensor, 
                                     mask: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
@@ -169,7 +169,7 @@ class DiffMetrics:
         pred_original = self._inverse_transform_trajectories(pred)
         target_original = self._inverse_transform_trajectories(target)
         
-        # Speed MAE (in km/h)
+        # FIXED: Speed MAE (ensuring it's MAE, not MSE)
         speed_pred = pred_original[:, :, 2]
         speed_target = target_original[:, :, 2]
         speed_mae = (torch.abs(speed_pred - speed_target) * mask).sum() / (mask.sum() + 1e-8)
@@ -196,10 +196,10 @@ class DiffMetrics:
         
         return {
             'mse': mse,
-            'speed_mae': speed_mae,
-            'distance_mae': distance_mae,
-            'total_distance_mae': total_distance_mae,
-            'bird_distance_mae': bird_distance_mae,
+            'speed_mae': speed_mae,          # Mean Absolute Error for speed (km/h)
+            'distance_mae': distance_mae,    # Point-to-point distance MAE (km)
+            'total_distance_mae': total_distance_mae,  # Total trajectory distance MAE (km)
+            'bird_distance_mae': bird_distance_mae,    # Straight-line distance MAE (km)
         }
     
     def _compute_total_distance(self, trajectories: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:

@@ -158,19 +158,44 @@ class TrajectoryLightningModule(pl.LightningModule):
             return
         
         # Define key metrics to aggregate
-        key_metrics = ['mse', 'speed_mse', 'total_distance_mae', 'bird_distance_mae']
+        key_metrics = ['mse', 'speed_mae', 'distance_mae', 'total_distance_mae', 'bird_distance_mae']
         
         # Aggregate metrics
         avg_metrics = {}
         for key in key_metrics:
             values = [out['metrics'][key].item() for out in self._validation_outputs 
-                     if key in out['metrics']]
+                    if key in out['metrics']]
             if values:
                 avg_metrics[key] = sum(values) / len(values)
         
-        # Log epoch summary
+        # Log epoch summary with better formatting
         if 'mse' in avg_metrics:
             self.log('val_epoch_mse', avg_metrics['mse'], prog_bar=True)
+        
+        # IMPROVED: Log additional epoch metrics for better visibility
+        if 'speed_mae' in avg_metrics:
+            self.log('val_epoch_speed_mae', avg_metrics['speed_mae'], prog_bar=False)
+        if 'total_distance_mae' in avg_metrics:
+            self.log('val_epoch_total_dist_mae', avg_metrics['total_distance_mae'], prog_bar=False)
+        
+        # ADDED: Log a summary of key metrics at epoch end
+        current_epoch = self.current_epoch
+        if current_epoch % 5 == 0 or current_epoch == 0:  # Every 5 epochs or first epoch
+            logger.info(f"\n{'='*50}")
+            logger.info(f"EPOCH {current_epoch} VALIDATION SUMMARY")
+            logger.info(f"{'='*50}")
+            for metric_name, value in avg_metrics.items():
+                if metric_name == 'mse':
+                    logger.info(f"MSE (scaled):        {value:>10.6f}")
+                elif metric_name == 'speed_mae':
+                    logger.info(f"Speed MAE (km/h):    {value:>10.3f}")
+                elif metric_name == 'distance_mae':
+                    logger.info(f"Point Dist MAE (km): {value:>10.3f}")
+                elif metric_name == 'total_distance_mae':
+                    logger.info(f"Total Dist MAE (km): {value:>10.3f}")
+                elif metric_name == 'bird_distance_mae':
+                    logger.info(f"Bird Dist MAE (km):  {value:>10.3f}")
+            logger.info(f"{'='*50}\n")
         
         # Clear outputs for next epoch
         self._validation_outputs.clear()

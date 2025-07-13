@@ -44,13 +44,13 @@ class SimpleVAELoss(BaseLoss):
         
         # Reconstruction loss (MSE)
         mask_expanded = mask.unsqueeze(-1).expand_as(x)
-        diff = (recon - x) ** 2
-        masked_diff = diff * mask_expanded
-        num_valid = mask_expanded.sum()
-        recon_loss = masked_diff.sum() / (num_valid + 1e-8)
+        valid_positions = mask_expanded.bool()
+        valid_recon = recon[valid_positions]
+        valid_x = x[valid_positions] 
+        recon_loss = F.mse_loss(valid_recon, valid_x)
         
         # KL divergence
-        kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        kl_loss = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
         
         # Total loss
         total = recon_loss + self.beta * kl_loss

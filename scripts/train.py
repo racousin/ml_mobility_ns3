@@ -16,7 +16,7 @@ import shutil
 sys.path.append(str(Path(__file__).parent.parent))
 from ml_mobility_ns3.data.dataset import TrajectoryDataset
 from ml_mobility_ns3.training.lightning_module import TrajectoryLightningModule
-from ml_mobility_ns3.training.callbacks import BestMetricsTracker
+from ml_mobility_ns3.training.callbacks import BestMetricsTracker, EarlyStoppingTracker
 from ml_mobility_ns3.utils.experiment_utils import ExperimentManager
 from torch.utils.data import DataLoader, random_split
 
@@ -133,6 +133,7 @@ class TrainingPipeline:
         
         return train_loader, val_loader
     
+
     def create_callbacks(self, exp_dir: Path) -> list:
         """Create training callbacks."""
         callbacks = []
@@ -162,6 +163,10 @@ class TrainingPipeline:
         # Best metrics tracker
         metrics_tracker = BestMetricsTracker(exp_dir)
         callbacks.append(metrics_tracker)
+        
+        # ADDED: Early stopping and LR tracking
+        tracking_callback = EarlyStoppingTracker()
+        callbacks.append(tracking_callback)
         
         return callbacks, checkpoint_callback
     

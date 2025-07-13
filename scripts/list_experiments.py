@@ -10,7 +10,6 @@ import yaml
 sys.path.append(str(Path(__file__).parent.parent))
 
 
-
 def load_experiment_metrics(exp_dir: Path) -> dict:
     """Load all available metrics for an experiment."""
     metrics = {}
@@ -48,12 +47,42 @@ def format_metric_value(value, decimals=4):
     if value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
         return "N/A"
     if isinstance(value, (int, float)):
-        return f"{value:.{decimals}f}"
+        # Use different decimal places for different metric ranges
+        if abs(value) < 0.001:
+            return f"{value:.6f}"
+        elif abs(value) < 1:
+            return f"{value:.4f}"
+        elif abs(value) < 100:
+            return f"{value:.3f}"
+        else:
+            return f"{value:.1f}"
     return str(value)
 
 
-def list_experiments(detailed=False):
-    """List all experiments with metrics."""
+def get_loss_type(exp_dir: Path, model_info: dict) -> str:
+    """Get the loss type from model info or config."""
+    # Check training_config first
+    if 'training_config' in model_info and 'loss' in model_info['training_config']:
+        loss_config = model_info['training_config']['loss']
+        if isinstance(loss_config, dict):
+            return loss_config.get('type', 'simple_vae')
+    
+    # Fallback to config file
+    config_path = exp_dir / "config.yaml"
+    if config_path.exists():
+        try:
+            with open(config_path, "r") as f:
+                config = yaml.safe_load(f)
+                loss_config = config.get("training", {}).get("loss", {})
+                return loss_config.get("type", "simple_vae")
+        except:
+            pass
+    
+    return "simple_vae"
+
+
+def list_experiments():
+    """List all experiments with detailed metrics."""
     manifest_path = Path("experiments") / "manifest.json"
     
     if not manifest_path.exists():
@@ -84,47 +113,29 @@ def list_experiments(detailed=False):
             metrics = load_experiment_metrics(exp_dir)
             
             # Get loss type
-            loss_type = "simple_vae"
-            if 'training_config' in model_info and 'loss' in model_info['training_config']:
-                loss_config = model_info['training_config']['loss']
-                if isinstance(loss_config, dict):
-                    loss_type = loss_config.get('type', 'simple_vae')
-            else:
-                # Fallback to config file
-                config_path = exp_dir / "config.yaml"
-                if config_path.exists():
-                    try:
-                        
-                        with open(config_path, "r") as f:
-                            config = yaml.safe_load(f)
-                            loss_config = config.get("training", {}).get("loss", {})
-                            loss_type = loss_config.get("type", "simple_vae")
-                    except:
-                        pass
+            loss_type = get_loss_type(exp_dir, model_info)
             
             params = model_info.get("parameters", {})
             final_metrics = model_info.get("final_metrics", {})
             
-            # Basic info
+            # Build row with all metrics
             row = [
                 exp["id"][:20] + "..." if len(exp["id"]) > 20 else exp["id"],
                 exp["model_type"],
                 loss_type,
                 exp["status"],
-                format_metric_value(metrics.get('val_loss', final_metrics.get('best_val_loss'))),
+                f"{params.get('total', 0):,}" if params.get('total') else "N/A",
                 final_metrics.get("epochs_trained", "N/A"),
-                f"{params.get('total', 0):,}" if params.get('total') else "N/A"
+                # Loss components
+                format_metric_value(metrics.get('val_loss', final_metrics.get('best_val_loss'))),
+                format_metric_value(metrics.get('val_recon_loss')),
+                format_metric_value(metrics.get('val_kl_loss')),
+                # Evaluation metrics (in interpretable units)
+                format_metric_value(metrics.get('val_speed_mae')),
+                format_metric_value(metrics.get('val_distance_mae')),
+                format_metric_value(metrics.get('val_total_distance_mae')),
+                format_metric_value(metrics.get('val_bird_distance_mae'))
             ]
-            
-            if detailed:
-                # Add detailed metrics
-                row.extend([
-                    format_metric_value(metrics.get('val_mse')),
-                    format_metric_value(metrics.get('val_kl_loss')),
-                    format_metric_value(metrics.get('val_total_distance_mae')),
-                    format_metric_value(metrics.get('val_bird_distance_mae')),
-                    format_metric_value(metrics.get('val_speed_mse'))
-                ])
             
             table_data.append(row)
             
@@ -139,32 +150,40 @@ def list_experiments(detailed=False):
         else:
             # Fallback for experiments without model_info.json
             row = [exp["id"], exp["model_type"], "unknown", exp["status"]]
-            row.extend(["N/A"] * (3 + (6 if detailed else 0)))
+            row.extend(["N/A"] * 9)  # 9 additional columns
             table_data.append(row)
     
-    # Print table
-    headers = ["Experiment ID", "Model", "Loss Type", "Status", "Best Loss", "Epochs", "Parameters"]
-    if detailed:
-        headers.extend(["MSE", "KL Loss", "Total Dist MAE", "Bird Dist MAE", "Speed MSE"])
+    # Print main table
+    headers = [
+        "Experiment ID", "Model", "Loss Type", "Status", "Parameters", "Epochs",
+        "Val Loss", "Recon Loss", "KL Loss",
+        "Speed MAE", "Dist MAE", "Total Dist MAE", "Bird Dist MAE"
+    ]
     
-    print("\n=== Experiments ===")
+    print("\n" + "="*120)
+    print("EXPERIMENT RESULTS")
+    print("="*120)
     print(tabulate(table_data, headers=headers, tablefmt="grid"))
     print(f"\nTotal experiments: {len(manifest['experiments'])}")
     
     # Show best models by different metrics
-    if detailed and all_metrics_data:
-        print("\n=== Best Models by Metric ===")
+    if all_metrics_data:
+        print("\n" + "="*80)
+        print("BEST MODELS BY METRIC")
+        print("="*80)
         
+        # Define metrics to track (with proper names and units)
         metrics_to_minimize = {
-            'val_loss': 'Validation Loss',
-            'val_mse': 'MSE',
-            'val_kl_loss': 'KL Loss',
-            'val_total_distance_mae': 'Total Distance MAE',
-            'val_bird_distance_mae': 'Bird Distance MAE',
-            'val_speed_mse': 'Speed MSE'
+            'val_loss': ('Overall Loss', ''),
+            'val_recon_loss': ('Reconstruction Loss', ''),
+            'val_kl_loss': ('KL Divergence', ''),
+            'val_speed_mae': ('Speed Error', 'km/h'),
+            'val_distance_mae': ('Position Error', 'km'),
+            'val_total_distance_mae': ('Total Distance Error', 'km'),
+            'val_bird_distance_mae': ('Bird Distance Error', 'km')
         }
         
-        for metric_key, metric_name in metrics_to_minimize.items():
+        for metric_key, (metric_name, unit) in metrics_to_minimize.items():
             # Find experiments with this metric
             valid_exps = []
             for exp_data in all_metrics_data:
@@ -174,22 +193,46 @@ def list_experiments(detailed=False):
                         valid_exps.append((exp_data, value))
             
             if valid_exps:
-                # Sort by metric value
+                # Sort by metric value (ascending - lower is better)
                 valid_exps.sort(key=lambda x: x[1])
                 
-                print(f"\nBest by {metric_name}:")
-                for exp_data, value in valid_exps[:3]:
+                unit_str = f" {unit}" if unit else ""
+                print(f"\n📈 Best by {metric_name}:")
+                for i, (exp_data, value) in enumerate(valid_exps[:3], 1):
                     exp_id = exp_data['id']
-                    if len(exp_id) > 30:
-                        exp_id = exp_id[:30] + "..."
-                    print(f"  {exp_id} ({exp_data['model']}/{exp_data['loss_type']}): {format_metric_value(value)}")
-
+                    if len(exp_id) > 35:
+                        exp_id = exp_id[:35] + "..."
+                    
+                    model_info = f"{exp_data['model']}/{exp_data['loss_type']}"
+                    print(f"  {i}. {exp_id}")
+                    print(f"     {model_info}: {format_metric_value(value)}{unit_str}")
+        
+        # Summary of completed experiments
+        completed_exps = [exp for exp in all_metrics_data]
+        if completed_exps:
+            print(f"\n📊 Summary:")
+            print(f"   • Completed experiments: {len(completed_exps)}")
+            
+            # Group by model type
+            model_types = {}
+            for exp in completed_exps:
+                model_type = exp['model']
+                if model_type not in model_types:
+                    model_types[model_type] = 0
+                model_types[model_type] += 1
+            
+            print(f"   • Model types: {', '.join([f'{k}({v})' for k, v in model_types.items()])}")
+            
+            # Group by loss type
+            loss_types = {}
+            for exp in completed_exps:
+                loss_type = exp['loss_type']
+                if loss_type not in loss_types:
+                    loss_types[loss_type] = 0
+                loss_types[loss_type] += 1
+            
+            print(f"   • Loss functions: {', '.join([f'{k}({v})' for k, v in loss_types.items()])}")
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--detailed", "-d", action="store_true", help="Show detailed metrics")
-    args = parser.parse_args()
-    
-    list_experiments(detailed=args.detailed)
+    list_experiments()

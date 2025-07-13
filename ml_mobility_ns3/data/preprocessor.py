@@ -59,10 +59,13 @@ class TrajectoryPreprocessor:
         # Step 3: Interpolate and resample
         interpolated_trips = self._interpolate_and_resample(merged_trips)
         
-        # Step 4: Cut and pad sequences
-        sequences = self._cut_and_pad_sequences(interpolated_trips)
+        # Step 4: Clip speed outliers
+        clipped_trips = self._clip_speed_outliers(interpolated_trips, percentile=99)
         
-        # Step 5: Prepare final dataset
+        # Step 5: Cut and pad sequences
+        sequences = self._cut_and_pad_sequences(clipped_trips)
+        
+        # Step 6: Prepare final dataset
         dataset = self._prepare_dataset(sequences)
         
         # Save outputs
@@ -165,6 +168,88 @@ class TrajectoryPreprocessor:
         
         return individuals_filtered, trips_after_filter4
     
+    def _clip_speed_outliers(self, interpolated_trips: List[Dict], percentile: int = 99) -> List[Dict]:
+        """
+        Clip speed outliers to the specified percentile threshold for each transport mode type.
+        
+        Args:
+            interpolated_trips: List of trip dictionaries with GPS points
+            percentile: Percentile threshold for clipping (default: 90)
+        
+        Returns:
+            List of trips with clipped speeds
+        """
+        from collections import defaultdict
+        
+        logger.info(f"Clipping speed outliers to {percentile}th percentile by transport mode...")
+        
+        # Group trips by transport mode type
+        trips_by_mode = defaultdict(list)
+        for trip in interpolated_trips:
+            trips_by_mode[trip['trip_type']].append(trip)
+        
+        # Calculate percentile thresholds for each mode
+        mode_thresholds = {}
+        for mode, mode_trips in trips_by_mode.items():
+            # Collect all speed values for this mode
+            all_speeds = []
+            for trip in mode_trips:
+                gps_points = trip['gps_points']
+                if len(gps_points) > 0:
+                    # Speed is in column 3 (index 3) of gps_points
+                    speeds = gps_points[:, 3]
+                    # Filter out any invalid speeds (negative or extremely high)
+                    valid_speeds = speeds[(speeds >= 0) & (speeds < 500)]  # reasonable upper bound
+                    all_speeds.extend(valid_speeds)
+            
+            if all_speeds:
+                threshold = np.percentile(all_speeds, percentile)
+                mode_thresholds[mode] = threshold
+                logger.info(f"  {mode}: {percentile}th percentile speed = {threshold:.2f} km/h")
+            else:
+                mode_thresholds[mode] = float('inf')  # No clipping if no valid speeds
+        
+        # Apply clipping to each trip
+        clipped_trips = []
+        total_clipped_points = 0
+        total_points = 0
+        
+        for trip in interpolated_trips:
+            mode = trip['trip_type']
+            threshold = mode_thresholds.get(mode, float('inf'))
+            
+            trip_clipped = trip.copy()
+            gps_points = trip['gps_points'].copy()
+            
+            if len(gps_points) > 0:
+                # Count points before clipping
+                speeds_before = gps_points[:, 3]
+                points_to_clip = np.sum(speeds_before > threshold)
+                total_clipped_points += points_to_clip
+                total_points += len(speeds_before)
+                
+                # Clip speeds to threshold
+                gps_points[:, 3] = np.clip(gps_points[:, 3], 0, threshold)
+                
+                # Update trip data
+                trip_clipped['gps_points'] = gps_points
+                
+                # Recalculate average speed for the trip
+                if len(gps_points) > 0:
+                    # Calculate new average speed from clipped GPS points
+                    valid_speeds = gps_points[:, 3]
+                    trip_clipped['speed_kmh'] = np.mean(valid_speeds) if len(valid_speeds) > 0 else 0
+            
+            clipped_trips.append(trip_clipped)
+        
+        # Log clipping statistics
+        clipping_percentage = (total_clipped_points / total_points * 100) if total_points > 0 else 0
+        logger.info(f"Speed clipping completed:")
+        logger.info(f"  Total GPS points processed: {total_points:,}")
+        logger.info(f"  Points clipped: {total_clipped_points:,} ({clipping_percentage:.2f}%)")
+        
+        return clipped_trips
+
     def _load_gps_file(self, user_id: int) -> pd.DataFrame:
         """Load GPS data for a specific user."""
         gps_file = self.data_dir / 'gps_dataset' / f'{user_id}.csv'
