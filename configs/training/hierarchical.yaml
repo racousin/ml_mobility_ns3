@@ -3,8 +3,8 @@ epochs: 300
 learning_rate: 0.001  # Lower learning rate for stability
 val_split: 0.1
 gradient_clip: 1.0
-early_stopping_patience: 40
-lr_scheduler_patience: 20
+early_stopping_patience: 30
+lr_scheduler_patience: 15
 lr_scheduler_factor: 0.5
 
 # Hierarchical loss configuration
