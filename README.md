@@ -31,16 +31,11 @@ python scripts/list_experiments.py
 ### Evaluation
 
 ```bash
-python scripts/evaluate.py exp_id=dummy_2025-07-12_13-14-14
+python scripts/evaluate.py +experiment_id=vae_dense_2025-07-14_16-14-23
 ```
 
-### Export to C++
 
-```bash
-python scripts/export.py export.output_dir=path/to/cpp/output
-```
-
-## Configuration
+### Configuration
 
 All configurations are managed through Hydra. Default configs are in `configs/`.
 
@@ -69,3 +64,10 @@ python scripts/train.py model.hidden_dim=128 training.learning_rate=1e-3
   - `export/`: Model export utilities
 - `configs/`: Hydra configuration files
 - `scripts/`: Entry point scripts
+
+### Export to C++
+
+```bash
+python scripts/export.py export.output_dir=path/to/cpp/output
+```
+

@@ -11,4 +11,12 @@ lr_scheduler_factor: 0.5
 loss:
   type: simple_vae
   params:
-    beta: 1.0
+    beta:
+      type: linear_annealing
+      params:
+        start: 0.0
+        end: 1.0
+        anneal_epochs: 100
+    free_bits:
+      enabled: true
+      lambda_free_bits: 2.0

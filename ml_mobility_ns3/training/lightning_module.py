@@ -8,7 +8,7 @@ from omegaconf import OmegaConf
 import logging
 
 from ml_mobility_ns3.metrics.diff_metrics import DiffMetrics
-from .losses import create_loss
+from .losses import create_loss, BaseLoss
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,15 @@ class TrajectoryLightningModule(pl.LightningModule):
         loss_config = self.config.training.loss
         self.loss_fn = create_loss(OmegaConf.to_container(loss_config))
         logger.info(f"Using loss function: {loss_config.type}")
+        
+        # Log beta scheduling info if applicable
+        loss_params = loss_config.get('params', {})
+        if 'beta' in loss_params and isinstance(loss_params['beta'], dict):
+            logger.info(f"Beta scheduling: {loss_params['beta']['type']}")
+        
+        # Log free bits info if enabled
+        if 'free_bits' in loss_params and loss_params['free_bits'].get('enabled', False):
+            logger.info(f"Free bits enabled with lambda={loss_params['free_bits'].get('lambda_free_bits', 2.0)}")
     
     def forward(self, x, transport_mode, length, mask=None):
         """Forward pass through the model."""
@@ -78,6 +87,9 @@ class TrajectoryLightningModule(pl.LightningModule):
         """Compute loss using configured loss function."""
         x, mask, transport_mode, length = self._prepare_batch(batch)
         
+        # Update loss function with current step/epoch for beta scheduling
+        self.loss_fn.update_step(self.global_step, self.current_epoch)
+        
         # Prepare targets dict
         targets = {
             'x': x,
@@ -97,7 +109,7 @@ class TrajectoryLightningModule(pl.LightningModule):
     
     def _log_metrics(self, loss: torch.Tensor, loss_components: Dict, 
                     metrics: Dict, prefix: str = 'train'):
-        """Log all metrics with proper prefix - supports hierarchical VAE."""
+        """Log all metrics with proper prefix - beta values."""
         # Log main loss
         self.log(f'{prefix}_loss', loss, prog_bar=True)
         
@@ -110,22 +122,13 @@ class TrajectoryLightningModule(pl.LightningModule):
         for key, value in metrics.items():
             self.log(f'{prefix}_{key}', value)
         
-        # Special handling for hierarchical VAE progress bar
-        if 'local_kl_loss' in loss_components and 'global_kl_loss' in loss_components:
-            # Show key hierarchical metrics in progress bar for training
-            if prefix == 'train':
-                self.log(f'{prefix}_local_kl', loss_components['local_kl_loss'], prog_bar=True)
-                self.log(f'{prefix}_global_kl', loss_components['global_kl_loss'], prog_bar=True)
-            
-            # Calculate and log the local/global KL ratio for analysis
-            local_kl = loss_components['local_kl_loss']
-            global_kl = loss_components['global_kl_loss']
-            kl_ratio = local_kl / (global_kl + 1e-8)
-            self.log(f'{prefix}_kl_ratio', kl_ratio)
+        # Special handling for beta values (for monitoring annealing)
+        if 'beta' in loss_components:
+            self.log(f'{prefix}_beta', loss_components['beta'], prog_bar=False)
     
     def training_step(self, batch, batch_idx):
         """Training step."""
-        x, mask, transport_mode, length = self._prepare_batch(batch)  # FIXED: was self.on_validation_epoch_end(batch)
+        x, mask, transport_mode, length = self._prepare_batch(batch)
         
         # Forward pass
         outputs = self.forward(x, transport_mode, length, mask)
@@ -160,17 +163,18 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Store for epoch end aggregation
         self._validation_outputs.append({
             'loss': loss,
-            'metrics': metrics
+            'metrics': metrics,
+            'loss_components': loss_components  # Store for beta tracking
         })
         
         return loss
     
     def on_validation_epoch_end(self):
-        """Aggregate validation metrics at epoch end - enhanced for hierarchical VAE."""
+        """Aggregate validation metrics at epoch end - enhanced for beta scheduling."""
         if not self._validation_outputs:
             return
         
-        # Define key metrics to aggregate - include hierarchical VAE metrics
+        # Define key metrics to aggregate - VAE metrics
         key_metrics = ['mse', 'speed_mae', 'distance_mae', 'total_distance_mae', 'bird_distance_mae']
         
         # Aggregate metrics
@@ -191,7 +195,13 @@ class TrajectoryLightningModule(pl.LightningModule):
         if 'total_distance_mae' in avg_metrics:
             self.log('val_epoch_total_dist_mae', avg_metrics['total_distance_mae'], prog_bar=False)
         
-        # Enhanced logging for hierarchical VAE
+        # Log beta values at epoch end (for monitoring annealing progress)
+        if self._validation_outputs and 'loss_components' in self._validation_outputs[-1]:
+            last_components = self._validation_outputs[-1]['loss_components']
+            if 'beta' in last_components:
+                logger.info(f"Current beta: {last_components['beta']:.4f}")
+
+        # Enhanced logging for VAE
         current_epoch = self.current_epoch
         if current_epoch % 5 == 0 or current_epoch == 0:
             logger.info(f"\n{'='*50}")
