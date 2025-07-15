@@ -1,0 +1,10 @@
+_target_: ml_mobility_ns3.models.vae_cnn.ConditionalTrajectoryVAECNN
+name: vae_cnn
+input_dim: 3
+base_channels: 64
+latent_dim: 32
+condition_dim: 32
+dropout: 0.1
+num_transport_modes: 5
+sequence_length: 2000
+use_batch_norm: true
