@@ -1,12 +1,14 @@
 batch_size: 32
-epochs: 500
+epochs: 1500
 learning_rate: 0.001
 val_split: 0.1
 gradient_clip: 1.0
-early_stopping_patience: 30
-lr_scheduler_patience: 15
+early_stopping_patience: 50
+early_stopping_monitor: val_recon_loss
+lr_scheduler_patience: 25
 lr_scheduler_factor: 0.5
-
+lr_scheduler_monitor: val_recon_loss
+best_metric_monitor: val_recon_loss
 # Loss configuration
 loss:
   type: simple_vae
@@ -16,7 +18,7 @@ loss:
       params:
         start: 0.0
         end: 0.02
-        anneal_epochs: 100
+        anneal_epochs: 500
     free_bits:
       enabled: true
       lambda_free_bits: 2.0

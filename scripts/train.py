@@ -142,7 +142,7 @@ class TrainingPipeline:
         checkpoint_callback = ModelCheckpoint(
             dirpath=exp_dir / "checkpoints",
             filename='{epoch:02d}_{val_loss:.4f}',
-            monitor='val_loss',
+            monitor=self.cfg.training.best_metric_monitor ,
             mode='min',
             save_top_k=1,
             save_last=True,
@@ -153,7 +153,7 @@ class TrainingPipeline:
         
         # Early stopping
         early_stopping = EarlyStopping(
-            monitor='val_loss',
+            monitor=self.cfg.training.early_stopping_monitor,
             patience=self.cfg.training.early_stopping_patience,
             mode='min',
             verbose=True
@@ -161,7 +161,10 @@ class TrainingPipeline:
         callbacks.append(early_stopping)
         
         # Best metrics tracker
-        metrics_tracker = BestMetricsTracker(exp_dir)
+        metrics_tracker = BestMetricsTracker(
+            exp_dir, 
+            monitor=self.cfg.training.best_metric_monitor 
+        )
         callbacks.append(metrics_tracker)
         
         # ADDED: Early stopping and LR tracking

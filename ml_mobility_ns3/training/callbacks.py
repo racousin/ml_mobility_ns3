@@ -44,11 +44,6 @@ class BestMetricsTracker(Callback):
                 'val_kl_loss', 'val_weighted_kl_loss'
             ]
             
-            # Hierarchical VAE metrics
-            hierarchical_vae_metrics = [
-                'val_local_kl_loss', 'val_global_kl_loss', 
-                'val_weighted_local_kl', 'val_weighted_global_kl'
-            ]
             
             # Loss-specific metrics
             distance_aware_metrics = [
@@ -61,7 +56,7 @@ class BestMetricsTracker(Callback):
             
             # Combine all possible metrics
             all_possible_metrics = (core_metrics + standard_vae_metrics + 
-                                  hierarchical_vae_metrics + distance_aware_metrics + 
+                                 distance_aware_metrics + 
                                   speed_aware_metrics)
             
             # Initialize best metrics dict
@@ -88,9 +83,7 @@ class BestMetricsTracker(Callback):
     
     def _detect_model_type(self) -> str:
         """Detect which type of VAE we're using based on available metrics."""
-        if 'val_local_kl_loss' in self.best_metrics and 'val_global_kl_loss' in self.best_metrics:
-            return 'hierarchical'
-        elif 'val_kl_loss' in self.best_metrics:
+        if 'val_kl_loss' in self.best_metrics:
             return 'standard'
         else:
             return 'unknown'
@@ -113,8 +106,7 @@ class BestMetricsTracker(Callback):
             logger.info(f"Reconstruction Loss:     {self.best_metrics['val_recon_loss']:>10.6f}")
         
         # Model-specific KL losses
-        if model_type == 'hierarchical':
-            self._log_hierarchical_kl_losses()
+
         elif model_type == 'standard':
             self._log_standard_kl_losses()
         
@@ -126,17 +118,6 @@ class BestMetricsTracker(Callback):
         self._log_evaluation_metrics()
         logger.info("=" * 70)
     
-    def _log_hierarchical_kl_losses(self):
-        """Log KL losses for hierarchical VAE."""
-        logger.info("KL Divergence Components:")
-        if 'val_local_kl_loss' in self.best_metrics:
-            logger.info(f"  Local KL (segments):   {self.best_metrics['val_local_kl_loss']:>10.6f}")
-        if 'val_global_kl_loss' in self.best_metrics:
-            logger.info(f"  Global KL (trajectory):{self.best_metrics['val_global_kl_loss']:>10.6f}")
-        if 'val_weighted_local_kl' in self.best_metrics:
-            logger.info(f"  Weighted Local KL:     {self.best_metrics['val_weighted_local_kl']:>10.6f}")
-        if 'val_weighted_global_kl' in self.best_metrics:
-            logger.info(f"  Weighted Global KL:    {self.best_metrics['val_weighted_global_kl']:>10.6f}")
     
     def _log_standard_kl_losses(self):
         """Log KL losses for standard VAE."""
@@ -192,7 +173,7 @@ class BestMetricsTracker(Callback):
             # Add best metrics
             model_info['best_metrics'] = self.best_metrics
             
-            # Extract key metrics for quick access (include both standard and hierarchical)
+            # Extract key metrics for quick access (include standard)
             key_metrics = {
                 'best_val_loss': self.best_metrics.get('val_loss'),
                 'best_mse': self.best_metrics.get('val_mse'),
@@ -208,10 +189,6 @@ class BestMetricsTracker(Callback):
                 # Standard VAE
                 key_metrics['best_kl_loss'] = self.best_metrics.get('val_kl_loss')
             
-            if 'val_local_kl_loss' in self.best_metrics:
-                # Hierarchical VAE
-                key_metrics['best_local_kl_loss'] = self.best_metrics.get('val_local_kl_loss')
-                key_metrics['best_global_kl_loss'] = self.best_metrics.get('val_global_kl_loss')
             
             # Add loss-specific metrics if they exist
             if 'val_distance_loss' in self.best_metrics:
