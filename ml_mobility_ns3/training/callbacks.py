@@ -14,24 +14,25 @@ logger = logging.getLogger(__name__)
 class BestMetricsTracker(Callback):
     """Track best metrics when validation loss improves - supports multiple VAE architectures."""
     
-    def __init__(self, experiment_dir: Path):
+    def __init__(self, experiment_dir: Path, monitor: str = 'val_loss'):
         super().__init__()
         self.experiment_dir = experiment_dir
+        self.monitor = monitor
         self.best_metrics = {}
-        self.best_val_loss = float('inf')
+        self.best_monitor_value = float('inf')
         
     def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
-        """Capture all metrics when validation loss improves."""
+        """Capture all metrics when monitored metric improves."""
         metrics = trainer.callback_metrics
         
-        # Get current validation loss
-        val_loss = metrics.get('val_loss', float('inf'))
-        if isinstance(val_loss, torch.Tensor):
-            val_loss = val_loss.item()
+        # Get current monitored metric value
+        monitor_value = metrics.get(self.monitor, float('inf'))
+        if isinstance(monitor_value, torch.Tensor):
+            monitor_value = monitor_value.item()
         
-        # If validation loss improved, capture all metrics
-        if val_loss < self.best_val_loss:
-            self.best_val_loss = val_loss
+        # If monitored metric improved, capture all metrics
+        if monitor_value < self.best_monitor_value:
+            self.best_monitor_value = monitor_value
             
             # Core metrics (always available)
             core_metrics = [
@@ -63,7 +64,8 @@ class BestMetricsTracker(Callback):
             self.best_metrics = {
                 'epoch': trainer.current_epoch,
                 'step': trainer.global_step,
-                'val_loss': val_loss
+                'monitored_metric': self.monitor,
+                'best_monitor_value': monitor_value
             }
             
             # Add metrics that actually exist
@@ -78,9 +80,9 @@ class BestMetricsTracker(Callback):
             self._save_best_metrics()
             
             # IMPROVED: Better formatted logging
-            logger.info(f"New best validation loss: {val_loss:.6f} at epoch {trainer.current_epoch}")
+            logger.info(f"New best {self.monitor}: {monitor_value:.6f} at epoch {trainer.current_epoch}")
             self._log_formatted_metrics()
-    
+        
     def _detect_model_type(self) -> str:
         """Detect which type of VAE we're using based on available metrics."""
         if 'val_kl_loss' in self.best_metrics:
