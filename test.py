@@ -1,10 +1,11 @@
 #!/usr/bin/env python
-"""Minimal script to inspect the scaled dataset."""
+"""Comprehensive script to understand why MSE ~0.02 is easy to achieve."""
 
 import numpy as np
 import torch
 from pathlib import Path
 import pickle
+from sklearn.metrics import mean_squared_error
 
 def inspect_dataset():
     """Inspect the processed dataset and scaler."""
@@ -21,6 +22,7 @@ def inspect_dataset():
     
     # Inspect trajectories
     trajectories = data['trajectories']
+    lengths = data.get('lengths', None)
     print(f"\n=== Trajectories Shape ===")
     print(f"Shape: {trajectories.shape}")
     print(f"Dtype: {trajectories.dtype}")
@@ -53,84 +55,190 @@ def inspect_dataset():
     print(f"Values < 0.0: {below_zero}")
     print(f"Values > 1.0: {above_one}")
     
-    # Sample trajectory inspection
-    print(f"\n=== Sample Trajectory ===")
-    sample_idx = 0
-    sample_traj = trajectories[sample_idx]
-    lengths = data.get('lengths', None)
+    # NEW: Analyze why 0.02 MSE is easy
+    print("\n" + "="*60)
+    print("=== ANALYZING WHY MSE ~0.02 IS EASY TO ACHIEVE ===")
+    print("="*60)
+    
+    # 1. Trivial baselines
+    print("\n=== Trivial Baseline MSEs ===")
+    
+    # Create masks for valid data points
     if lengths is not None:
-        actual_length = lengths[sample_idx]
-        print(f"Trajectory {sample_idx} length: {actual_length}")
-        print(f"First 5 points:")
-        for i in range(min(5, actual_length)):
-            print(f"  Point {i}: lat={sample_traj[i,0]:.4f}, lon={sample_traj[i,1]:.4f}, speed={sample_traj[i,2]:.4f}")
+        masks = np.zeros_like(trajectories[:, :, 0], dtype=bool)
+        for i, length in enumerate(lengths):
+            masks[i, :length] = True
+    else:
+        masks = np.ones_like(trajectories[:, :, 0], dtype=bool)
+    
+    # Baseline 1: Predict mean
+    mean_prediction = np.ones_like(trajectories) * trajectories[masks].mean(axis=0)
+    mse_mean = ((trajectories - mean_prediction)**2)[masks].mean()
+    print(f"MSE (predict global mean): {mse_mean:.6f}")
+    
+    # Baseline 2: Predict zeros
+    zero_prediction = np.zeros_like(trajectories)
+    mse_zero = ((trajectories - zero_prediction)**2)[masks].mean()
+    print(f"MSE (predict zeros): {mse_zero:.6f}")
+    
+    # Baseline 3: Predict previous point (persistence model)
+    persistence_pred = np.zeros_like(trajectories)
+    persistence_pred[:, 1:] = trajectories[:, :-1]
+    persistence_pred[:, 0] = trajectories[:, 0]  # First point stays same
+    mse_persistence = ((trajectories - persistence_pred)**2)[masks].mean()
+    print(f"MSE (predict previous point): {mse_persistence:.6f}")
+    
+    # Baseline 4: Add small noise to input
+    noise_levels = [0.01, 0.05, 0.1]
+    for noise in noise_levels:
+        noisy_pred = trajectories + np.random.normal(0, noise, trajectories.shape)
+        mse_noise = ((trajectories - noisy_pred)**2)[masks].mean()
+        print(f"MSE (add {noise} std noise): {mse_noise:.6f}")
+    
+    # 2. Analyze data smoothness
+    print("\n=== Data Smoothness Analysis ===")
+    
+    # Calculate point-to-point differences
+    diffs = trajectories[:, 1:] - trajectories[:, :-1]
+    if lengths is not None:
+        diff_masks = np.zeros_like(diffs[:, :, 0], dtype=bool)
+        for i, length in enumerate(lengths):
+            if length > 1:
+                diff_masks[i, :length-1] = True
+    else:
+        diff_masks = np.ones_like(diffs[:, :, 0], dtype=bool)
+    
+    print(f"Average step size (consecutive points):")
+    for i, feature in enumerate(['lat', 'lon', 'speed']):
+        avg_diff = np.abs(diffs[:, :, i])[diff_masks].mean()
+        std_diff = np.abs(diffs[:, :, i])[diff_masks].std()
+        print(f"  {feature}: {avg_diff:.6f} ± {std_diff:.6f}")
+    
+    # 3. Analyze variance structure
+    print("\n=== Variance Analysis ===")
+    
+    # Total variance
+    total_var = trajectories[masks].var()
+    print(f"Total variance in data: {total_var:.6f}")
+    
+    # Variance per feature
+    for i, feature in enumerate(['lat', 'lon', 'speed']):
+        feat_var = trajectories[:, :, i][masks].var()
+        print(f"Variance in {feature}: {feat_var:.6f}")
+    
+    # Within-trajectory vs between-trajectory variance
+    within_vars = []
+    for i in range(len(trajectories)):
+        if lengths is not None:
+            traj_data = trajectories[i, :lengths[i]]
+        else:
+            traj_data = trajectories[i]
+        if len(traj_data) > 1:
+            within_vars.append(traj_data.var(axis=0))
+    
+    within_var = np.mean(within_vars, axis=0)
+    between_var = trajectories[masks].mean(axis=0).var()
+    
+    print(f"\nWithin-trajectory variance: {within_var}")
+    print(f"Between-trajectory variance: {between_var:.6f}")
+    
+    # 4. Check correlation structure
+    print("\n=== Temporal Correlation ===")
+    
+    # Autocorrelation at different lags
+    lags = [1, 5, 10, 20]
+    for lag in lags:
+        correlations = []
+        for i in range(len(trajectories)):
+            if lengths is not None and lengths[i] > lag:
+                traj = trajectories[i, :lengths[i]]
+            else:
+                traj = trajectories[i]
+            
+            if len(traj) > lag:
+                for feat in range(3):
+                    corr = np.corrcoef(traj[:-lag, feat], traj[lag:, feat])[0, 1]
+                    if not np.isnan(corr):
+                        correlations.append(corr)
+        
+        if correlations:
+            print(f"Average autocorrelation at lag {lag}: {np.mean(correlations):.4f}")
+    
+    # 5. Check if data is mostly static
+    print("\n=== Static Point Analysis ===")
+    
+    # Check how many points don't change
+    static_threshold = 0.001
+    for i, feature in enumerate(['lat', 'lon', 'speed']):
+        static_points = np.abs(diffs[:, :, i])[diff_masks] < static_threshold
+        percent_static = static_points.sum() / diff_masks.sum() * 100
+        print(f"{feature} - Points with change < {static_threshold}: {percent_static:.1f}%")
+    
+    # 6. MSE decomposition
+    print("\n=== MSE Decomposition ===")
+    
+    # What MSE would we get per feature with mean prediction?
+    for i, feature in enumerate(['lat', 'lon', 'speed']):
+        feat_data = trajectories[:, :, i][masks]
+        feat_mean = feat_data.mean()
+        feat_mse = ((feat_data - feat_mean)**2).mean()
+        print(f"{feature} MSE (predict mean): {feat_mse:.6f}")
+        
+        # What's the contribution to total MSE?
+        print(f"  Contribution to total: {feat_mse/3:.6f}")
+    
+    # 7. Distribution analysis
+    print("\n=== Distribution Analysis ===")
+    
+    # Check if data is concentrated in small range
+    percentiles = [1, 5, 25, 50, 75, 95, 99]
+    for i, feature in enumerate(['lat', 'lon', 'speed']):
+        feat_data = trajectories[:, :, i][masks]
+        percs = np.percentile(feat_data, percentiles)
+        print(f"\n{feature} percentiles:")
+        for p, v in zip(percentiles, percs):
+            print(f"  {p}%: {v:.4f}")
+        print(f"  IQR: {percs[4] - percs[2]:.4f}")
+        print(f"  90% range: {percs[5] - percs[1]:.4f}")
+    
+    # 8. Check what your models are likely learning
+    print("\n=== What Models Might Be Learning ===")
+    
+    # Average trajectory shape
+    avg_trajectory = trajectories[masks].reshape(-1, 3).mean(axis=0)
+    print(f"Average trajectory point: {avg_trajectory}")
+    
+    # MSE if we always predict the average trajectory
+    constant_pred = np.ones_like(trajectories) * avg_trajectory
+    mse_constant = ((trajectories - constant_pred)**2)[masks].mean()
+    print(f"MSE (predict constant average): {mse_constant:.6f}")
+    
+    # Compare to your model's MSE
+    your_model_mse = 0.0209  # From your results
+    print(f"\nYour models achieve: {your_model_mse:.6f}")
+    print(f"Improvement over mean baseline: {((mse_mean - your_model_mse) / mse_mean * 100):.1f}%")
+    print(f"Improvement over persistence: {((mse_persistence - your_model_mse) / mse_persistence * 100):.1f}%")
     
     # Load and inspect scaler
     scaler_path = Path('data/processed/scalers.pkl')
     if scaler_path.exists():
-        print(f"\n=== Scaler Information ===")
+        print(f"\n=== Scaler Impact ===")
         with open(scaler_path, 'rb') as f:
             scalers = pickle.load(f)
         
         if 'trajectory' in scalers:
             scaler = scalers['trajectory']
-            print(f"Scaler type: {type(scaler).__name__}")
-            if hasattr(scaler, 'data_min_'):
-                print(f"Original min values: {scaler.data_min_}")
-            if hasattr(scaler, 'data_max_'):
-                print(f"Original max values: {scaler.data_max_}")
             if hasattr(scaler, 'data_range_'):
-                print(f"Original ranges: {scaler.data_range_}")
-    
-    # Test inverse transform on a sample
-    print(f"\n=== Inverse Transform Test ===")
-    if 'scalers' in locals():
-        scaler = scalers.get('trajectory')
-        if scaler is not None:
-            # Take first few points of first trajectory
-            sample_scaled = trajectories[0, :3, :]  # First 3 points
-            sample_original = scaler.inverse_transform(sample_scaled)
-            
-            print("Scaled -> Original transform:")
-            for i in range(3):
-                print(f"  Point {i}:")
-                print(f"    Scaled: lat={sample_scaled[i,0]:.4f}, lon={sample_scaled[i,1]:.4f}, speed={sample_scaled[i,2]:.4f}")
-                print(f"    Original: lat={sample_original[i,0]:.4f}, lon={sample_original[i,1]:.4f}, speed={sample_original[i,2]:.4f}")
-
-def check_model_outputs():
-    """Quick check of what the model outputs look like."""
-    print("\n" + "="*50)
-    print("=== MODEL OUTPUT INSPECTION ===")
-    
-    # Load a trained model checkpoint if available
-    import sys
-    from pathlib import Path
-    sys.path.append(str(Path('.').absolute()))
-    
-    try:
-        from ml_mobility_ns3.data.dataset import TrajectoryDataset
-        from torch.utils.data import DataLoader
-        
-        # Load dataset
-        dataset = TrajectoryDataset('data/processed/dataset.npz')
-        loader = DataLoader(dataset, batch_size=4, shuffle=False)
-        
-        # Get a sample batch
-        batch = next(iter(loader))
-        x, mask, transport_mode, length = batch
-        
-        print(f"Input batch shape: {x.shape}")
-        print(f"Input range: [{x.min():.4f}, {x.max():.4f}]")
-        print(f"Mask shape: {mask.shape}")
-        
-        # Show sample input values
-        print(f"\nSample input values (first trajectory, first 3 points):")
-        for i in range(3):
-            print(f"  Point {i}: [{x[0,i,0]:.4f}, {x[0,i,1]:.4f}, {x[0,i,2]:.4f}]")
-        
-    except Exception as e:
-        print(f"Could not load model/data: {e}")
+                print(f"Original data ranges: {scaler.data_range_}")
+                print(f"Compression ratio: {1.0 / scaler.data_range_}")
+                
+                # What's 0.02 MSE in original scale?
+                # MSE in scaled = (error_original / range)^2
+                # error_original = sqrt(MSE_scaled) * range
+                mse_scaled = 0.0209
+                error_original = np.sqrt(mse_scaled) * scaler.data_range_
+                print(f"\nMSE {mse_scaled:.4f} in scaled space corresponds to:")
+                print(f"RMSE in original space: {error_original}")
 
 if __name__ == "__main__":
     inspect_dataset()
-    check_model_outputs()

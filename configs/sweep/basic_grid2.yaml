@@ -47,10 +47,11 @@ python scripts/train.py \
   --multirun
 
 
-python scripts/train.py model.hidden_dim=128,256 model.latent_dim=16,64,256 training.batch_size=128 training.loss.params.beta=0.5,1.0,2.0,5.0 devices=[4] --multirun
+python scripts/train.py model.hidden_dim=128,256 model.latent_dim=16,64,256 training.batch_size=128 training.loss.params.beta=0.1 devices=[4] --multirun
 
 python scripts/train.py \
   model=vae_attention \
+  training.loss.params.beta=0.1 \
   model.hidden_dim=32,128 \
   model.latent_dim=16,64 \
   model.num_attention_heads=4,8 \
