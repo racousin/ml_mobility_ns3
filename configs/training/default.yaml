@@ -15,7 +15,7 @@ loss:
       type: linear_annealing
       params:
         start: 0.0
-        end: 1.0
+        end: 0.02
         anneal_epochs: 100
     free_bits:
       enabled: true
