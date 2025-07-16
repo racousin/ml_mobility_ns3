@@ -4,21 +4,22 @@ learning_rate: 0.001
 val_split: 0.1
 gradient_clip: 1.0
 early_stopping_patience: 50
-early_stopping_monitor: val_recon_loss
-lr_scheduler_patience: 25
+early_stopping_monitor: val_loss
+lr_scheduler_patience: 30
 lr_scheduler_factor: 0.5
-lr_scheduler_monitor: val_recon_loss
-best_metric_monitor: val_recon_loss
+lr_scheduler_monitor: val_loss
+best_metric_monitor: val_loss
 # Loss configuration
 loss:
   type: simple_vae
   params:
     beta:
-      type: linear_annealing
+      type: cyclical
       params:
-        start: 0.0
-        end: 0.02
-        anneal_epochs: 500
+        min_beta: 0.0
+        max_beta: 0.01
+        cycle_length: 20
+        mode: cosine
     free_bits:
       enabled: true
       lambda_free_bits: 2.0
