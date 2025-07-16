@@ -17,7 +17,7 @@ loss:
       type: cyclical
       params:
         min_beta: 0.0
-        max_beta: 0.01
+        max_beta: 0.5
         cycle_length: 20
         mode: cosine
     free_bits:
