@@ -16,10 +16,10 @@ loss:
     beta:
       type: cyclical
       params:
-        min_beta: 0.0
+        min_beta: 0.001
         max_beta: 0.5
         cycle_length: 20
         mode: cosine
     free_bits:
-      enabled: true
+      enabled: false
       lambda_free_bits: 2.0

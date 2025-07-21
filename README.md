@@ -9,7 +9,7 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-## Usage
+## Part 1: Preprocess, Train, Evaluate Trajectory Generation
 
 ### Data Preprocessing
 
@@ -34,6 +34,11 @@ python scripts/list_experiments.py
 python scripts/evaluate.py +experiment_id=vae_dense_2025-07-14_16-14-23
 ```
 
+### Generated Trajectories Example
+
+![Generated Trajectories](./2500gen.png)
+
+*Example of generated trajectories showing the model's capability to produce realistic mobility patterns.*
 
 ### Configuration
 
@@ -54,20 +59,69 @@ python scripts/train.py --config-path=configs/sweep --config-name=basic_grid --m
 python scripts/train.py model.hidden_dim=128 training.learning_rate=1e-3
 ```
 
-## Project Structure
+## Part 2: Use Trajectory Generation Model in NS-3
 
-- `ml_mobility_ns3/`: Core package
-  - `data/`: Data preprocessing and datasets
-  - `models/`: Model architectures
-  - `training/`: PyTorch Lightning modules
-  - `evaluation/`: Evaluation metrics and scripts
-  - `export/`: Model export utilities
-- `configs/`: Hydra configuration files
-- `scripts/`: Entry point scripts
+### NS-3 Installation
 
-### Export to C++
+First, check your OS version and install dependencies:
 
 ```bash
-python scripts/export.py export.output_dir=path/to/cpp/output
+cat /etc/os-release
+sudo apt install git g++ clang python3 python3-pip cmake ninja-build tcpdump wireshark
+python3 -m pip install --user cppyy==3.1.2
 ```
 
+Download and build NS-3:
+
+```bash
+tar -jxvf ns-3.45.tar.bz2
+cd ns-3.45
+./ns3 configure --enable-examples --enable-tests
+./ns3 build
+./test.py
+./ns3 run hello-simulator
+```
+
+### Export Model for NS-3
+
+Export your trained model for integration with NS-3:
+
+```bash
+python scripts/export.py +experiment_id=your_experiment_id path_model_path_experiment_to_import=path/to/your/model
+```
+
+Note: The export script directly integrates the model into NS-3 without requiring separate export files.
+
+### Installation of the netmob25 Mobility Model in NS-3.45
+
+Follow these steps to integrate the netmob25 mobility model:
+
+1. **Copy model files:**
+   ```bash
+   cp netmob25-mobility-model.h ns-3.45/src/mobility/model/
+   cp netmob25-mobility-model.cc ns-3.45/src/mobility/model/
+   ```
+
+2. **Update CMakeLists.txt:**
+   Add `netmob25-mobility-model.h` and `netmob25-mobility-model.cc` to the CMakeLists.txt file in `ns-3.45/src/mobility/`
+
+3. **Copy example file:**
+   ```bash
+   cp netmob25-mobility-example.cc ns-3.45/scratch/
+   ```
+
+4. **Recompile NS-3:**
+   ```bash
+   cd ns-3.45
+   ./ns3 configure --enable-examples --enable-tests
+   ./ns3 build
+   ```
+
+5. **Test the mobility model:**
+   ```bash
+   ./ns3 run scratch/netmob25-mobility-example.cc
+   ```
+
+### Usage in NS-3
+
+Once installed, you can use the netmob25 mobility model in your NS-3 simulations to generate realistic mobility patterns based on your trained trajectory generation models.
