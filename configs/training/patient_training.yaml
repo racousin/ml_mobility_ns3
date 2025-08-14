@@ -1,0 +1,27 @@
+batch_size: 32
+epochs: 2000
+learning_rate: 0.001
+val_split: 0.1
+gradient_clip: 1.0
+# More patient early stopping to allow beta to increase
+early_stopping_patience: 150  # Increased from 50
+early_stopping_monitor: recon_loss  # Monitor reconstruction instead of total loss
+early_stopping_mode: min
+early_stopping_min_delta: 0.00001  # More tolerant to small changes
+lr_scheduler_patience: 50  # Increased from 30
+lr_scheduler_factor: 0.5
+lr_scheduler_monitor: recon_loss
+best_metric_monitor: val_loss
+# Loss configuration with slower beta annealing
+loss:
+  type: simple_vae
+  params:
+    beta:
+      type: linear_annealing
+      params:
+        start: 0.00001  # Start very low
+        end: 0.01  # End at reasonable value
+        anneal_epochs: 500  # Slow annealing over 500 epochs
+    free_bits:
+      enabled: true
+      lambda_free_bits: 3.0  # Allow more free bits to prevent collapse

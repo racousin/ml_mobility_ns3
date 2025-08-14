@@ -1,0 +1,38 @@
+# @package _global_
+
+defaults:
+  - override /model: ???
+  - override /training: ???
+
+# Sweep over most promising model architectures and training strategies
+hydra:
+  mode: MULTIRUN
+  sweep:
+    dir: experiments/sweep_${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${model.name}_${training.loss.params.beta.type}_beta${training.loss.params.beta.params.end}_lr${training.learning_rate}
+  launcher:
+    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher
+    max_workers: 4  # Run 4 experiments in parallel
+
+# Override parameters for sweep
+model:
+  - vae_lstm
+  - vae_attention
+
+training:
+  - patient_training
+  - warmup_training
+
+# Additional parameter grid
+hydra/sweeper:
+  params:
+    model.hidden_dim: 128,256
+    model.latent_dim: 16,32
+    training.learning_rate: 0.001,0.0005
+    training.loss.params.beta.params.end: 0.001,0.005,0.01
+    training.loss.params.free_bits.lambda_free_bits: 2.0,3.0,4.0
+    training.batch_size: 32,64
+
+# GPU allocation
+accelerator: gpu
+devices: [3,4,5,6]  # Use GPUs 3-6
