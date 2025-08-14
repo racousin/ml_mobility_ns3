@@ -64,6 +64,11 @@ def main(cfg: DictConfig):
     exporter = CppExporter(cfg)
     exporter.export_model(checkpoint, metadata, str(checkpoint_path.parent.parent))
     
+    # Check for NS-3 integration option
+    if hasattr(cfg, 'ns3_path') and cfg.ns3_path:
+        logger.info(f"Integrating with NS-3 at {cfg.ns3_path}")
+        exporter.integrate_with_ns3(cfg.ns3_path)
+    
 
 if __name__ == "__main__":
     main()

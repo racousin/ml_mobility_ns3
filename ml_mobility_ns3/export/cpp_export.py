@@ -240,3 +240,139 @@ fi
             f.write(build_content)
         build_script.chmod(0o755)
         logger.info(f"Created build script: {build_script}")
+    
+    def integrate_with_ns3(self, ns3_path: str):
+        """Integrate the exported model with NS-3"""
+        logger.info(f"Integrating with NS-3 at {ns3_path}")
+        
+        ns3_path = Path(ns3_path)
+        if not ns3_path.exists():
+            raise FileNotFoundError(f"NS-3 directory not found: {ns3_path}")
+        
+        if not (ns3_path / "ns3").exists():
+            raise ValueError(f"Invalid NS-3 directory (ns3 script not found): {ns3_path}")
+        
+        # Use the export_to_ns3.sh script from cpp_export directory
+        export_script = Path("cpp_export") / "export_to_ns3.sh"
+        if not export_script.exists():
+            logger.warning("export_to_ns3.sh script not found, creating basic integration")
+            self._manual_ns3_integration(ns3_path)
+        else:
+            # Run the export script
+            import subprocess
+            try:
+                result = subprocess.run([str(export_script), str(ns3_path)], 
+                                      capture_output=True, text=True, check=True)
+                logger.info("NS-3 integration successful")
+                logger.info(result.stdout)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"NS-3 integration failed: {e.stderr}")
+                raise
+        
+        # Copy model files to NS-3
+        model_file = self.output_dir / "model.pt"
+        metadata_file = self.output_dir / "metadata.json"
+        
+        if model_file.exists():
+            shutil.copy(model_file, ns3_path)
+            logger.info(f"Copied model file to {ns3_path}")
+        
+        if metadata_file.exists():
+            shutil.copy(metadata_file, ns3_path)
+            logger.info(f"Copied metadata file to {ns3_path}")
+        
+        # Create NS-3 specific build and test script
+        self._create_ns3_test_script(ns3_path)
+        
+        logger.info("NS-3 integration complete!")
+        logger.info(f"To test: cd {ns3_path} && ./test_netmob25.sh")
+    
+    def _manual_ns3_integration(self, ns3_path: Path):
+        """Manual NS-3 integration when export script is not available"""
+        logger.info("Performing manual NS-3 integration")
+        
+        # Copy mobility model files if they exist in cpp_export
+        cpp_export_dir = Path("cpp_export")
+        
+        mobility_files = [
+            "netmob25-mobility-model.h",
+            "netmob25-mobility-model.cc",
+            "netmob25-mobility-example.cc"
+        ]
+        
+        for filename in mobility_files:
+            src_file = cpp_export_dir / filename
+            if src_file.exists():
+                if "example" in filename:
+                    dst_path = ns3_path / "scratch" / filename
+                else:
+                    dst_path = ns3_path / "src" / "mobility" / "model" / filename
+                
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(src_file, dst_path)
+                logger.info(f"Copied {filename} to {dst_path}")
+        
+        # Update CMakeLists.txt if it hasn't been updated
+        self._update_cmake_if_needed(ns3_path)
+    
+    def _update_cmake_if_needed(self, ns3_path: Path):
+        """Update mobility CMakeLists.txt if netmob25 files aren't included"""
+        cmake_file = ns3_path / "src" / "mobility" / "CMakeLists.txt"
+        
+        if not cmake_file.exists():
+            logger.warning(f"CMakeLists.txt not found at {cmake_file}")
+            return
+        
+        with open(cmake_file, 'r') as f:
+            content = f.read()
+        
+        if "netmob25-mobility-model.cc" in content:
+            logger.info("CMakeLists.txt already includes netmob25 files")
+            return
+        
+        logger.info("Updating CMakeLists.txt to include netmob25 files")
+        
+        # Add to MOBILITY_SOURCE_FILES if PyTorch section exists
+        if "if(TARGET torch)" in content:
+            # The modern approach is already there, files should be added automatically
+            logger.info("PyTorch integration detected, files should be added automatically")
+        else:
+            logger.warning("Manual CMakeLists.txt update may be needed")
+    
+    def _create_ns3_test_script(self, ns3_path: Path):
+        """Create a test script for NS-3 integration"""
+        test_script = ns3_path / "test_netmob25_export.sh"
+        
+        test_content = f'''#!/bin/bash
+# Test script for exported Netmob25 mobility model in NS-3
+
+echo "=== Testing Exported Netmob25 Mobility Model ==="
+
+# Configure NS-3 with PyTorch support
+echo "Configuring NS-3..."
+CMAKE_PREFIX_PATH="/Users/raphaelcousin/Library/Caches/pypoetry/virtualenvs/ml-mobility-ns3-nuqJhA4m-py3.13/lib/python3.13/site-packages/torch/share/cmake" ./ns3 configure --enable-examples --enable-tests
+
+# Build NS-3
+echo "Building NS-3..."
+CMAKE_PREFIX_PATH="/Users/raphaelcousin/Library/Caches/pypoetry/virtualenvs/ml-mobility-ns3-nuqJhA4m-py3.13/lib/python3.13/site-packages/torch/share/cmake" ./ns3 build
+
+# Test basic mobility model
+echo "Testing basic mobility model..."
+./ns3 run "scratch/netmob25-mobility-example --nNodes=3 --simTime=10 --printInterval=2"
+
+# Test with ML model if available
+if [ -f "model.pt" ]; then
+    echo "Testing with ML model..."
+    ./ns3 run "scratch/netmob25-mobility-example --useMLGeneration=true --modelPath=model.pt --nNodes=2 --simTime=5"
+else
+    echo "No model.pt found, skipping ML test"
+fi
+
+echo "Test complete!"
+'''
+        
+        with open(test_script, 'w') as f:
+            f.write(test_content)
+        test_script.chmod(0o755)
+        
+        logger.info(f"Created NS-3 test script: {test_script}")
