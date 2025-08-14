@@ -11,17 +11,16 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 # Include directories
 include_directories(.)
 
-# Add executable
-add_executable(run_trajectory_gen
-    main.cc
+# Create library for NS-3 integration
+add_library(netmob25_mobility_lib STATIC
     trajectory_generator.cc
 )
 
-# Link libraries
-target_link_libraries(run_trajectory_gen "${TORCH_LIBRARIES}")
+# Link libraries to the library
+target_link_libraries(netmob25_mobility_lib "${TORCH_LIBRARIES}")
 
 # Set C++ standard for target
-set_property(TARGET run_trajectory_gen PROPERTY CXX_STANDARD 17)
+set_property(TARGET netmob25_mobility_lib PROPERTY CXX_STANDARD 17)
 
 # Enable debugging symbols
 set(CMAKE_BUILD_TYPE Debug)

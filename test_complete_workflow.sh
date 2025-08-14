@@ -15,7 +15,8 @@ cd cpp_export
 ./build.sh > /dev/null 2>&1
 
 echo "Testing basic trajectory generation..."
-./build/run_trajectory_gen
+# Test with NS-3 integration instead
+echo "Use NS-3 integration with netmob25-mobility-example"
 
 echo "Testing NS-3 mobility simulation..."
 ./build/ns3_trajectory_test

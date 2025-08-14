@@ -20,20 +20,37 @@ class CppExporter:
     def export_model(self, checkpoint, metadata: Dict[str, Any], experiment_name: str = "trajectory_model"):
         logger.info(f"Exporting model to C++ in {self.output_dir}")
         
+        # Create NS-3 experiment-specific directory  
+        ns3_experiment_dir = self.output_dir / f"ns3.45_{experiment_name}"
+        ns3_experiment_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Also create generic experiment directory for compatibility
+        experiment_dir = self.output_dir / experiment_name
+        experiment_dir.mkdir(parents=True, exist_ok=True)
+        
         # Recreate model architecture
         model = self._recreate_model(checkpoint)
         
-        # Convert to TorchScript
+        # Convert to TorchScript and save in NS-3 experiment directory
         if self.config.export.compile_torchscript:
-            self._export_torchscript(model)
+            self._export_torchscript(model, ns3_experiment_dir)
         
-        # Save metadata
-        self._save_metadata(metadata, experiment_name)
+        # Save metadata in NS-3 experiment directory
+        self._save_metadata(metadata, experiment_name, ns3_experiment_dir)
         
-        # Generate C++ project files
+        # Generate NS-3 files in NS-3 experiment directory
+        self._generate_ns3_files(experiment_name, ns3_experiment_dir)
+        
+        # Also save in generic experiment directory for compatibility
+        if self.config.export.compile_torchscript:
+            self._export_torchscript(model, experiment_dir)
+        self._save_metadata(metadata, experiment_name, experiment_dir)
+        
+        # Generate C++ project files in main output directory (for compatibility)
         self._generate_cpp_project(experiment_name)
         
-        logger.info(f"Export complete! C++ project created in {self.output_dir}")
+        logger.info(f"Export complete! NS-3 files created in {ns3_experiment_dir}")
+        logger.info(f"Experiment files also stored in {experiment_dir}")
         
     def _recreate_model(self, checkpoint):
         """Recreate model from checkpoint"""
@@ -80,7 +97,7 @@ class CppExporter:
             # Checkpoint is already a model
             return checkpoint
         
-    def _export_torchscript(self, model):
+    def _export_torchscript(self, model, experiment_dir=None):
         model.eval()
         
         # Create a wrapper for models that return dictionaries
@@ -116,16 +133,18 @@ class CppExporter:
                                               (example_x, example_mode, example_length))
                 
             # Save traced model
-            traced_path = self.output_dir / 'model.pt'
+            save_dir = experiment_dir if experiment_dir else self.output_dir
+            traced_path = save_dir / 'model.pt'
             traced_model.save(str(traced_path))
             logger.info(f"Saved TorchScript model to {traced_path}")
             
         except Exception as e:
             logger.warning(f"Could not trace model: {e}")
             # Save the model state dict as fallback
-            torch.save(model.state_dict(), self.output_dir / 'model_state.pt')
+            save_dir = experiment_dir if experiment_dir else self.output_dir
+            torch.save(model.state_dict(), save_dir / 'model_state.pt')
             torch.save({'model_config': model.config if hasattr(model, 'config') else {}}, 
-                      self.output_dir / 'model_config.pt')
+                      save_dir / 'model_config.pt')
             logger.info("Saved model state dict and config instead of TorchScript")
         
     def _create_example_input(self, model):
@@ -144,7 +163,7 @@ class CppExporter:
         # Default input shape (batch_size=1, seq_len, features)
         return torch.randn(1, seq_len, input_dim)
     
-    def _save_metadata(self, metadata: Dict[str, Any], experiment_name: str):
+    def _save_metadata(self, metadata: Dict[str, Any], experiment_name: str, experiment_dir=None):
         """Save metadata as JSON"""
         # Convert numpy arrays to lists for JSON serialization
         json_metadata = {}
@@ -156,10 +175,70 @@ class CppExporter:
         
         json_metadata['experiment_name'] = experiment_name
         
-        metadata_path = self.output_dir / 'metadata.json'
+        save_dir = experiment_dir if experiment_dir else self.output_dir
+        metadata_path = save_dir / 'metadata.json'
         with open(metadata_path, 'w') as f:
             json.dump(json_metadata, f, indent=2)
         logger.info(f"Saved metadata to {metadata_path}")
+        
+    def _generate_ns3_files(self, experiment_name: str, ns3_experiment_dir: Path):
+        """Generate NS-3 mobility model files from templates"""
+        template_dir = Path('cpp_project')
+        
+        if not template_dir.exists():
+            logger.error(f"Template directory {template_dir} not found")
+            return
+            
+        # Setup Jinja2 environment
+        env = Environment(loader=FileSystemLoader(str(template_dir)))
+        
+        # Template context
+        context = {
+            'project_name': 'netmob25_mobility',
+            'experiment_name': experiment_name,
+            'model_path': 'model.p',
+        }
+        
+        # Generate NS-3 specific files in the NS-3 experiment directory
+        ns3_templates = [
+            'netmob25-mobility-model.h.jinja',
+            'netmob25-mobility-model.cc.jinja', 
+            'netmob25-mobility-example.cc.jinja'
+        ]
+        
+        for template_name in ns3_templates:
+            template_file = template_dir / template_name
+            if template_file.exists():
+                template = env.get_template(template_name)
+                output_content = template.render(**context)
+                
+                # Remove .jinja extension and save in NS-3 experiment directory
+                output_file = ns3_experiment_dir / template_file.stem
+                with open(output_file, 'w') as f:
+                    f.write(output_content)
+                logger.info(f"Generated NS-3 file: {output_file}")
+            else:
+                logger.warning(f"Template {template_name} not found")
+        
+        # Copy model.pt as model.p in NS-3 experiment directory
+        model_file = ns3_experiment_dir / 'model.pt'
+        if model_file.exists():
+            model_p_file = ns3_experiment_dir / 'model.p'
+            shutil.copy(model_file, model_p_file)
+            logger.info(f"Created {model_p_file} for NS-3 compatibility")
+            
+        # Also generate in main output directory for backwards compatibility
+        for template_name in ns3_templates:
+            template_file = template_dir / template_name
+            if template_file.exists():
+                template = env.get_template(template_name)
+                output_content = template.render(**context)
+                
+                # Remove .jinja extension
+                output_file = self.output_dir / template_file.stem
+                with open(output_file, 'w') as f:
+                    f.write(output_content)
+                logger.info(f"Generated NS-3 file in main dir: {output_file}")
             
     def _generate_cpp_project(self, experiment_name: str):
         """Generate C++ project files from templates"""
@@ -230,7 +309,7 @@ cmake .. -DCMAKE_PREFIX_PATH="$TORCH_CMAKE_PATH"
 make -j4
 
 if [ $? -eq 0 ]; then
-    echo "Build complete! Run ./build/run_trajectory_gen to test"
+    echo "Build complete! Use the generated NS-3 mobility model files."
 else
     echo "Build failed!"
     exit 1

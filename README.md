@@ -61,253 +61,79 @@ python scripts/train.py model.hidden_dim=128 training.learning_rate=1e-3
 
 ## Part 2: Use Trajectory Generation Model in NS-3
 
-### NS-3 Installation
+### NS-3 Integration
 
-First, check your OS version and install dependencies:
+#### Prerequisites
 
+1. **Install NS-3:**
 ```bash
-cat /etc/os-release
-sudo apt install git g++ clang python3 python3-pip cmake ninja-build tcpdump wireshark
-python3 -m pip install --user cppyy==3.1.2
-```
-
-Download and build NS-3:
-
-```bash
-tar -jxvf ns-3.45.tar.bz2
-cd ns-3.45
+wget https://www.nsnam.org/releases/ns-allinone-3.45.tar.bz2
+tar -jxvf ns-allinone-3.45.tar.bz2
+cd ns-allinone-3.45/ns-3.45
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
-./test.py
-./ns3 run hello-simulator
 ```
 
-### Export Model for NS-3
-
-Export your trained model for integration with NS-3:
-
+2. **Download and Install PyTorch:**
 ```bash
-# Export a specific experiment
-poetry run python scripts/export.py +experiment_id=your_experiment_id
-
-# Example using the dummy model
-poetry run python scripts/export.py +experiment_id=dummy_2025-07-13_19-17-59
+# Download PyTorch C++ (LibTorch) - CPU version
+wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcpu.zip
+unzip libtorch-cxx11-abi-shared-with-deps-2.1.0+cpu.zip
+export TORCH_ROOT=$(pwd)/libtorch
+export CMAKE_PREFIX_PATH=$TORCH_ROOT:$CMAKE_PREFIX_PATH
 ```
 
-This will:
-- Convert the PyTorch model to TorchScript format
-- Generate C++ project files with LibTorch integration
-- Create a complete build system with CMake
-
-The exported files will be in the `cpp_export/` directory.
-
-### Build and Test C++ Trajectory Generator
-
-After exporting, build and test the C++ trajectory generator:
+#### Export and Integration
 
 ```bash
-cd cpp_export
-
-# Build the project (requires LibTorch/PyTorch)
-./build.sh
-
-# Test the trajectory generator
-./build/run_trajectory_gen
+# 1. Export your trained model
+poetry run python scripts/export.py +experiment_id=vae_lstm_2025-07-16_12-30-52
 ```
 
-#### Manual Build (if build.sh fails)
-
-If the automatic build script fails, you can build manually:
-
-```bash
-cd cpp_export
-mkdir -p build
-cd build
-
-# Find PyTorch cmake path
-CMAKE_PATH=$(poetry run python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
-
-# Configure and build
-cmake .. -DCMAKE_PREFIX_PATH="$CMAKE_PATH"
-make -j4
-
-# Run the generator
-./run_trajectory_gen
-```
-
-### System Requirements for C++ Integration
-
-- **CMake** 3.10 or higher
-- **C++17** compatible compiler
-- **PyTorch/LibTorch** (automatically detected from Python installation)
-
-On macOS:
-```bash
-# Install XCode command line tools
-xcode-select --install
-
-# Install CMake (via Homebrew)
-brew install cmake
-```
-
-### Installation of the netmob25 Mobility Model in NS-3.45
-
-Follow these steps to integrate the netmob25 mobility model:
-
-1. **Copy model files:**
-   ```bash
-   cp netmob25-mobility-model.h ns-3.45/src/mobility/model/
-   cp netmob25-mobility-model.cc ns-3.45/src/mobility/model/
-   ```
-
-2. **Update CMakeLists.txt:**
-   Add `netmob25-mobility-model.h` and `netmob25-mobility-model.cc` to the CMakeLists.txt file in `ns-3.45/src/mobility/`
-
-3. **Copy example file:**
-   ```bash
-   cp netmob25-mobility-example.cc ns-3.45/scratch/
-   ```
-
-4. **Recompile NS-3:**
-   ```bash
-   cd ns-3.45
-   ./ns3 configure --enable-examples --enable-tests
-   ./ns3 build
-   ```
-
-5. **Test the mobility model:**
-   ```bash
-   ./ns3 run scratch/netmob25-mobility-example.cc
-   ```
-
-## NS-3 Integration with ML Trajectory Generator
-
-### Quick Test of C++ Trajectory Generator
-
-Before integrating with NS-3, test the trajectory generator:
+This creates `cpp_export/ns3.45_vae_lstm_2025-07-16_12-30-52/` containing:
+- `netmob25-mobility-model.h` - NS-3 mobility model header
+- `netmob25-mobility-model.cc` - NS-3 mobility model implementation  
+- `netmob25-mobility-example.cc` - Complete simulation example
+- `model.p` - ML model file for PyTorch inference
 
 ```bash
-cd cpp_export
+# 2. Copy files to NS-3
+cd cpp_export/ns3.45_vae_lstm_2025-07-16_12-30-52
+cp netmob25-mobility-model.* ns-3.45/src/mobility/model/
+cp netmob25-mobility-example.cc ns-3.45/scratch/
+cp model.p ns-3.45/
 
-# Build both the standalone test and NS-3 simulation test
-./build.sh
-
-# Test the basic trajectory generator
-./build/run_trajectory_gen
-
-# Test the NS-3 mobility simulation
-./build/ns3_trajectory_test
-```
-
-### Full NS-3 Integration
-
-#### 1. Install Trajectory Generator into NS-3
-
-```bash
-cd cpp_export
-
-# Install trajectory generator and example into NS-3
-./install_to_ns3.sh ../ns-3.45
-```
-
-This script will:
-- Copy `trajectory_generator.{h,cc}` to NS-3's mobility module
-- Copy `model.pt` to NS-3's scratch directory  
-- Copy the complete NS-3 example to scratch
-- Update NS-3's CMakeLists.txt to include trajectory generator
-- Create configuration helper for PyTorch paths
-
-#### 2. Configure NS-3 with PyTorch Support
-
-```bash
+# 3. Build NS-3 with PyTorch support
 cd ns-3.45
+CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 configure --enable-examples
+CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 build
 
-# Get PyTorch configuration
-poetry run python3 scratch/trajectory_pytorch_config.py
-
-# Configure NS-3 with PyTorch (use the command shown by the script above)
-./ns3 configure --enable-examples --build-profile=optimized \
-  CPPFLAGS="-I/path/to/pytorch/include" \
-  LINKFLAGS="-L/path/to/pytorch/lib -ltorch -ltorch_library -lc10"
+# 4. Run the example with ML trajectory generation
+./ns3 run "scratch/netmob25-mobility-example --useMLGeneration=true --modelPath=model.p --nNodes=4 --simTime=30"
 ```
 
-#### 3. Build and Run NS-3 Example
+### Expected Output
 
-```bash
-# Build NS-3
-./ns3 build
+The simulation will show node positions and generate an animation file:
 
-# Run the ML trajectory mobility example
-./ns3 run scratch/ns3-trajectory-mobility-example
+```
+=== Netmob25 Mobility Example ===
+Nodes: 4
+Simulation time: 30 seconds  
+ML Generation: Enabled
+Model path: model.p
+Animation file: netmob25-animation.xml
+Experiment: vae_lstm_2025-07-16_12-30-52
+==============================
 
-# Optional: Run with parameters
-./ns3 run "scratch/ns3-trajectory-mobility-example --nNodes=10 --time=200"
+Time: 5s - Node positions:
+  Node 0: (245.3, 178.9)
+  Node 1: (312.7, 89.2)  
+  Node 2: (156.8, 234.1)
+  Node 3: (89.4, 167.5)
+
+Simulation completed!
+Generated animation: netmob25-animation.xml
 ```
 
-#### 4. NS-3 Example Features
-
-The NS-3 example (`ns3-trajectory-mobility-example.cc`) demonstrates:
-
-- **Custom Mobility Model**: `MLTrajectoryMobilityModel` that uses ML-generated trajectories
-- **WiFi Network**: Ad-hoc network with realistic mobility patterns
-- **UDP Applications**: Echo client/server to test connectivity
-- **Animation Output**: NetAnim-compatible XML for visualization
-- **Tracing**: ASCII and PCAP traces for analysis
-
-#### 5. Customizing for Your Models
-
-To use your own trained models:
-
-1. Export your model:
-```bash
-poetry run python scripts/export.py +experiment_id=your_model_id
-```
-
-2. Copy the new `model.pt` to NS-3:
-```bash
-cp cpp_export/model.pt ns-3.45/scratch/
-```
-
-3. Modify trajectory scaling in the example if needed:
-```cpp
-// In ns3-trajectory-mobility-example.cc
-m_currentPosition = Vector (
-    m_trajectory[m_currentStep][0].item<float>() * 1000,  // Adjust scale factor
-    m_trajectory[m_currentStep][1].item<float>() * 1000,  // Adjust scale factor
-    0.0
-);
-```
-
-#### 6. Integration with Your Own NS-3 Applications
-
-To integrate the trajectory generator with your own NS-3 code:
-
-1. Include the trajectory generator:
-```cpp
-#include "trajectory_generator.h"
-```
-
-2. Initialize and generate trajectories:
-```cpp
-TrajectoryGenerator generator("model.pt");
-auto trajectories = generator.generate(numNodes, sequenceLength);
-```
-
-3. Apply to nodes using `MLTrajectoryMobilityModel` or extract waypoints for other mobility models
-
-### Troubleshooting NS-3 Integration
-
-**Build Issues:**
-- Ensure PyTorch is properly installed and paths are correct
-- Check that `trajectory_generator.{h,cc}` are in `src/mobility/model/`
-- Verify CMakeLists.txt was updated correctly
-
-**Runtime Issues:**
-- Make sure `model.pt` is in the correct directory (usually `scratch/`)
-- Check that the model was exported correctly
-- Ensure trajectory scaling is appropriate for your simulation area
-
-**Performance:**
-- Use CPU-optimized models for faster simulation
-- Consider reducing trajectory sequence length for large-scale simulations
-- Profile memory usage with many nodes
+You can visualize the mobility patterns using NetAnim with the generated XML file.

@@ -49,8 +49,8 @@ python scripts/evaluate.py +experiment_id=vae_dense_2025-07-14_16-14-23
 # Export model for NS-3 integration  
 poetry run python scripts/export.py +experiment_id=your_experiment_id
 
-# Build and test C++ trajectory generator
-cd cpp_export && ./build.sh && ./build/run_trajectory_gen
+# Build and test NS-3 integration
+cd cpp_export && CMAKE_PREFIX_PATH="$(poetry run python -c 'import torch; print(torch.utils.cmake_prefix_path)')" ./ns3 build
 ```
 
 ### Code Quality
