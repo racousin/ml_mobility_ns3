@@ -38,7 +38,7 @@ python scripts/train.py --config-path=configs/sweep --config-name=basic_grid --m
 python scripts/train.py model=dummy training.epochs=3 accelerator=cpu
 ```
 
-### Evaluation and Export
+### Evaluation
 ```bash
 # List all experiments
 python scripts/list_experiments.py
@@ -46,26 +46,6 @@ python scripts/list_experiments.py
 # Evaluate a specific experiment
 python scripts/evaluate.py +experiment_id=vae_dense_2025-07-14_16-14-23
 
-# Export model for NS-3 integration  
-poetry run python scripts/export.py +experiment_id=your_experiment_id
-
-# Build and test NS-3 integration
-cd cpp_export && CMAKE_PREFIX_PATH="$(poetry run python -c 'import torch; print(torch.utils.cmake_prefix_path)')" ./ns3 build
-```
-
-### Code Quality
-```bash
-# Format code with black
-black ml_mobility_ns3/ scripts/
-
-# Sort imports
-isort ml_mobility_ns3/ scripts/
-
-# Lint with flake8
-flake8 ml_mobility_ns3/ scripts/
-
-# Run tests (if available)
-pytest
 ```
 
 ## Architecture

@@ -17,7 +17,7 @@ cpp/
 experiments/
 logs/
 all_real_trajectories.html
-cpp_export/
+cpp_ns3_export/
 
 
 # Distribution / packaging

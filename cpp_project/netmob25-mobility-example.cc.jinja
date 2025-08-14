@@ -41,8 +41,6 @@ main (int argc, char *argv[])
   // Command line parameters
   uint32_t nNodes = 4;
   double simTime = 30.0;
-  bool useMLGeneration = false;
-  std::string modelPath = "model.p";
   bool verbose = false;
   double printInterval = 5.0;
   bool enablePcap = false;
@@ -51,8 +49,6 @@ main (int argc, char *argv[])
   CommandLine cmd (__FILE__);
   cmd.AddValue ("nNodes", "Number of nodes", nNodes);
   cmd.AddValue ("simTime", "Simulation time (seconds)", simTime);
-  cmd.AddValue ("useMLGeneration", "Use ML model for trajectory generation", useMLGeneration);
-  cmd.AddValue ("modelPath", "Path to ML model file", modelPath);
   cmd.AddValue ("verbose", "Enable verbose logging", verbose);
   cmd.AddValue ("printInterval", "Interval for printing positions (seconds)", printInterval);
   cmd.AddValue ("enablePcap", "Enable PCAP tracing", enablePcap);
@@ -91,55 +87,12 @@ main (int argc, char *argv[])
                             "UpdateInterval", TimeValue (Seconds (1.0)),
                             "ScaleX", DoubleValue (1000.0),
                             "ScaleY", DoubleValue (1000.0),
-                            "UseMLGeneration", BooleanValue (useMLGeneration),
-                            "ModelPath", StringValue (modelPath));
+                            "UseMLGeneration", BooleanValue (true),
+                            "ModelPath", StringValue ("model.p"));
   
   mobility.Install (nodes);
 
-  // Create some simple trajectories for nodes if not using ML generation
-  if (!useMLGeneration)
-    {
-      for (uint32_t i = 0; i < nNodes; ++i)
-        {
-          Ptr<Netmob25MobilityModel> mobilityModel = 
-            nodes.Get (i)->GetObject<Netmob25MobilityModel> ();
-          
-          std::vector<Vector> trajectory;
-          
-          // Create different patterns for each node
-          uint32_t numPoints = 60; // 60 seconds of movement
-          double radius = 200.0 + i * 100.0; // Different radius per node
-          double offset = i * M_PI / 2.0; // Phase offset
-          
-          for (uint32_t j = 0; j < numPoints; ++j)
-            {
-              double t = j * 2.0 * M_PI / numPoints;
-              Vector pos;
-              
-              switch (i % 4)
-                {
-                case 0: // Circle
-                  pos = Vector (radius * cos (t + offset), radius * sin (t + offset), 0.0);
-                  break;
-                case 1: // Figure-8
-                  pos = Vector (radius * sin (2 * t + offset), radius * sin (t + offset), 0.0);
-                  break;
-                case 2: // Linear back and forth
-                  pos = Vector (radius * sin (t + offset), i * 50.0, 0.0);
-                  break;
-                case 3: // Random walk
-                default:
-                  pos = Vector ((rand() % 200 - 100) + radius * cos (t + offset),
-                               (rand() % 200 - 100) + radius * sin (t + offset), 0.0);
-                  break;
-                }
-              
-              trajectory.push_back (pos);
-            }
-          
-          mobilityModel->SetTrajectory (trajectory);
-        }
-    }
+  // ML generation is always enabled - trajectories loaded from model.p
 
   // Install Internet stack
   InternetStackHelper stack;
@@ -212,11 +165,8 @@ main (int argc, char *argv[])
   std::cout << "=== Netmob25 Mobility Example ===" << std::endl;
   std::cout << "Nodes: " << nNodes << std::endl;
   std::cout << "Simulation time: " << simTime << " seconds" << std::endl;
-  std::cout << "ML Generation: " << (useMLGeneration ? "Enabled" : "Disabled") << std::endl;
-  if (useMLGeneration)
-    {
-      std::cout << "Model path: " << modelPath << std::endl;
-    }
+  std::cout << "ML Generation: Enabled" << std::endl;
+  std::cout << "Model path: model.p" << std::endl;
   std::cout << "Animation file: " << animationFile << std::endl;
   std::cout << "Experiment: {{ experiment_name }}" << std::endl;
   std::cout << "==============================" << std::endl;

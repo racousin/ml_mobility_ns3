@@ -34,6 +34,10 @@ def main(cfg: DictConfig):
             # Create a new config with structured merging disabled
             cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
             OmegaConf.set_struct(cfg, False)
+            # Override the export.output_dir to use cpp_ns3_export
+            if 'export' not in experiment_cfg:
+                experiment_cfg['export'] = {}
+            experiment_cfg['export']['output_dir'] = 'cpp_ns3_export'
             cfg = OmegaConf.merge(cfg, experiment_cfg)
     else:
         # Use default checkpoint path
@@ -60,9 +64,14 @@ def main(cfg: DictConfig):
         with open(metadata_path, 'rb') as f:
             metadata = pickle.load(f)
     
-    # Export
+    # Export - use experiment_id if available, otherwise use model name
+    if hasattr(cfg, 'experiment_id'):
+        export_name = cfg.experiment_id
+    else:
+        export_name = checkpoint_path.stem
+    
     exporter = CppExporter(cfg)
-    exporter.export_model(checkpoint, metadata, str(checkpoint_path.parent.parent))
+    exporter.export_model(checkpoint, metadata, export_name)
     
     # Check for NS-3 integration option
     if hasattr(cfg, 'ns3_path') and cfg.ns3_path:

@@ -16,41 +16,29 @@ class CppExporter:
         self.config = config
         self.output_dir = Path(config.export.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"CppExporter initialized with output_dir: {self.output_dir}")
         
     def export_model(self, checkpoint, metadata: Dict[str, Any], experiment_name: str = "trajectory_model"):
         logger.info(f"Exporting model to C++ in {self.output_dir}")
         
-        # Create NS-3 experiment-specific directory  
-        ns3_experiment_dir = self.output_dir / f"ns3.45_{experiment_name}"
-        ns3_experiment_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Also create generic experiment directory for compatibility
+        # Create experiment-specific directory in cpp_ns3_export
         experiment_dir = self.output_dir / experiment_name
         experiment_dir.mkdir(parents=True, exist_ok=True)
         
         # Recreate model architecture
         model = self._recreate_model(checkpoint)
         
-        # Convert to TorchScript and save in NS-3 experiment directory
-        if self.config.export.compile_torchscript:
-            self._export_torchscript(model, ns3_experiment_dir)
-        
-        # Save metadata in NS-3 experiment directory
-        self._save_metadata(metadata, experiment_name, ns3_experiment_dir)
-        
-        # Generate NS-3 files in NS-3 experiment directory
-        self._generate_ns3_files(experiment_name, ns3_experiment_dir)
-        
-        # Also save in generic experiment directory for compatibility
+        # Convert to TorchScript and save in experiment directory
         if self.config.export.compile_torchscript:
             self._export_torchscript(model, experiment_dir)
+        
+        # Save metadata in experiment directory
         self._save_metadata(metadata, experiment_name, experiment_dir)
         
-        # Generate C++ project files in main output directory (for compatibility)
-        self._generate_cpp_project(experiment_name)
+        # Generate NS-3 files in experiment directory
+        self._generate_ns3_files(experiment_name, experiment_dir)
         
-        logger.info(f"Export complete! NS-3 files created in {ns3_experiment_dir}")
-        logger.info(f"Experiment files also stored in {experiment_dir}")
+        logger.info(f"Export complete! NS-3 files created in {experiment_dir}")
         
     def _recreate_model(self, checkpoint):
         """Recreate model from checkpoint"""
@@ -181,7 +169,7 @@ class CppExporter:
             json.dump(json_metadata, f, indent=2)
         logger.info(f"Saved metadata to {metadata_path}")
         
-    def _generate_ns3_files(self, experiment_name: str, ns3_experiment_dir: Path):
+    def _generate_ns3_files(self, experiment_name: str, experiment_dir: Path):
         """Generate NS-3 mobility model files from templates"""
         template_dir = Path('cpp_project')
         
@@ -199,11 +187,14 @@ class CppExporter:
             'model_path': 'model.p',
         }
         
-        # Generate NS-3 specific files in the NS-3 experiment directory
+        # Generate NS-3 specific files from templates
         ns3_templates = [
             'netmob25-mobility-model.h.jinja',
             'netmob25-mobility-model.cc.jinja', 
-            'netmob25-mobility-example.cc.jinja'
+            'netmob25-mobility-example.cc.jinja',
+            'trajectory_generator.h.jinja',
+            'trajectory_generator.cc.jinja',
+            'CMakeLists.txt.jinja'
         ]
         
         for template_name in ns3_templates:
@@ -212,113 +203,32 @@ class CppExporter:
                 template = env.get_template(template_name)
                 output_content = template.render(**context)
                 
-                # Remove .jinja extension and save in NS-3 experiment directory
-                output_file = ns3_experiment_dir / template_file.stem
+                # Remove .jinja extension and save in experiment directory
+                output_file = experiment_dir / template_file.stem
                 with open(output_file, 'w') as f:
                     f.write(output_content)
                 logger.info(f"Generated NS-3 file: {output_file}")
             else:
                 logger.warning(f"Template {template_name} not found")
+                
+        # Copy non-template files (like json.hpp)
+        static_files = ['json.hpp']
+        for file_name in static_files:
+            src_file = template_dir / file_name
+            if src_file.exists():
+                dst_file = experiment_dir / file_name
+                shutil.copy(src_file, dst_file)
+                logger.info(f"Copied static file: {dst_file}")
+            else:
+                logger.warning(f"Static file {file_name} not found")
         
-        # Copy model.pt as model.p in NS-3 experiment directory
-        model_file = ns3_experiment_dir / 'model.pt'
+        # Copy model.pt as model.p in experiment directory
+        model_file = experiment_dir / 'model.pt'
         if model_file.exists():
-            model_p_file = ns3_experiment_dir / 'model.p'
+            model_p_file = experiment_dir / 'model.p'
             shutil.copy(model_file, model_p_file)
             logger.info(f"Created {model_p_file} for NS-3 compatibility")
             
-        # Also generate in main output directory for backwards compatibility
-        for template_name in ns3_templates:
-            template_file = template_dir / template_name
-            if template_file.exists():
-                template = env.get_template(template_name)
-                output_content = template.render(**context)
-                
-                # Remove .jinja extension
-                output_file = self.output_dir / template_file.stem
-                with open(output_file, 'w') as f:
-                    f.write(output_content)
-                logger.info(f"Generated NS-3 file in main dir: {output_file}")
-            
-    def _generate_cpp_project(self, experiment_name: str):
-        """Generate C++ project files from templates"""
-        template_dir = Path('cpp_project')
-        
-        if not template_dir.exists():
-            logger.error(f"Template directory {template_dir} not found")
-            return
-            
-        # Setup Jinja2 environment
-        env = Environment(loader=FileSystemLoader(str(template_dir)))
-        
-        # Template context
-        context = {
-            'project_name': 'trajectory_generator',
-            'experiment_name': experiment_name,
-            'model_path': 'model.pt',
-        }
-        
-        # Generate files from templates
-        for template_file in template_dir.glob('*.jinja'):
-            template = env.get_template(template_file.name)
-            output_content = template.render(**context)
-            
-            # Remove .jinja extension
-            output_file = self.output_dir / template_file.stem
-            with open(output_file, 'w') as f:
-                f.write(output_content)
-            logger.info(f"Generated {output_file}")
-        
-        # Copy non-template files
-        for file in template_dir.glob('*'):
-            if not file.name.endswith('.jinja') and not file.name.endswith('.placeholder'):
-                if file.name == 'json.hpp':
-                    shutil.copy(file, self.output_dir / file.name)
-                    logger.info(f"Copied {file.name}")
-        
-        # Create a simple build script
-        build_script = self.output_dir / 'build.sh'
-        build_content = """#!/bin/bash
-# Build script for trajectory generator
-
-# Create build directory
-mkdir -p build
-cd build
-
-# Find PyTorch installation - try different methods
-if command -v python3 &> /dev/null; then
-    TORCH_CMAKE_PATH=$(python3 -c 'import torch; print(torch.utils.cmake_prefix_path)' 2>/dev/null)
-elif command -v python &> /dev/null; then
-    TORCH_CMAKE_PATH=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)' 2>/dev/null)
-else
-    echo "Python not found. Please install Python and PyTorch."
-    exit 1
-fi
-
-if [ -z "$TORCH_CMAKE_PATH" ]; then
-    echo "Could not find PyTorch cmake path. Please ensure PyTorch is installed."
-    exit 1
-fi
-
-echo "Using PyTorch cmake path: $TORCH_CMAKE_PATH"
-
-# Configure with CMake
-cmake .. -DCMAKE_PREFIX_PATH="$TORCH_CMAKE_PATH"
-
-# Build
-make -j4
-
-if [ $? -eq 0 ]; then
-    echo "Build complete! Use the generated NS-3 mobility model files."
-else
-    echo "Build failed!"
-    exit 1
-fi
-"""
-        with open(build_script, 'w') as f:
-            f.write(build_content)
-        build_script.chmod(0o755)
-        logger.info(f"Created build script: {build_script}")
     
     def integrate_with_ns3(self, ns3_path: str):
         """Integrate the exported model with NS-3"""
@@ -331,8 +241,8 @@ fi
         if not (ns3_path / "ns3").exists():
             raise ValueError(f"Invalid NS-3 directory (ns3 script not found): {ns3_path}")
         
-        # Use the export_to_ns3.sh script from cpp_export directory
-        export_script = Path("cpp_export") / "export_to_ns3.sh"
+        # Use the export_to_ns3.sh script from cpp_ns3_export directory
+        export_script = Path("cpp_ns3_export") / "export_to_ns3.sh"
         if not export_script.exists():
             logger.warning("export_to_ns3.sh script not found, creating basic integration")
             self._manual_ns3_integration(ns3_path)
@@ -370,8 +280,8 @@ fi
         """Manual NS-3 integration when export script is not available"""
         logger.info("Performing manual NS-3 integration")
         
-        # Copy mobility model files if they exist in cpp_export
-        cpp_export_dir = Path("cpp_export")
+        # Copy mobility model files if they exist in cpp_ns3_export
+        cpp_ns3_export_dir = Path("cpp_ns3_export")
         
         mobility_files = [
             "netmob25-mobility-model.h",
@@ -380,7 +290,7 @@ fi
         ]
         
         for filename in mobility_files:
-            src_file = cpp_export_dir / filename
+            src_file = cpp_ns3_export_dir / filename
             if src_file.exists():
                 if "example" in filename:
                     dst_path = ns3_path / "scratch" / filename

@@ -90,18 +90,19 @@ export CMAKE_PREFIX_PATH=$TORCH_ROOT:$CMAKE_PREFIX_PATH
 poetry run python scripts/export.py +experiment_id=vae_lstm_2025-07-16_12-30-52
 ```
 
-This creates `cpp_export/ns3.45_vae_lstm_2025-07-16_12-30-52/` containing:
+This creates `cpp_ns3_export/vae_lstm_2025-07-16_12-30-52/` containing:
 - `netmob25-mobility-model.h` - NS-3 mobility model header
 - `netmob25-mobility-model.cc` - NS-3 mobility model implementation  
 - `netmob25-mobility-example.cc` - Complete simulation example
 - `model.p` - ML model file for PyTorch inference
+- `metadata.json` - Model metadata including input/output dimensions
 
 ```bash
 # 2. Copy files to NS-3
-cd cpp_export/ns3.45_vae_lstm_2025-07-16_12-30-52
-cp netmob25-mobility-model.* ns-3.45/src/mobility/model/
-cp netmob25-mobility-example.cc ns-3.45/scratch/
-cp model.p ns-3.45/
+cd cpp_ns3_export/vae_lstm_2025-07-16_12-30-52
+cp netmob25-mobility-model.* ../../ns-3.45/src/mobility/model/
+cp netmob25-mobility-example.cc ../../ns-3.45/scratch/
+cp model.p ../../ns-3.45/
 
 # 3. Build NS-3 with PyTorch support
 cd ns-3.45
@@ -109,7 +110,7 @@ CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 configure --enable-examples
 CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 build
 
 # 4. Run the example with ML trajectory generation
-./ns3 run "scratch/netmob25-mobility-example --useMLGeneration=true --modelPath=model.p --nNodes=4 --simTime=30"
+./ns3 run "scratch/netmob25-mobility-example --nNodes=4 --simTime=30"
 ```
 
 ### Expected Output
