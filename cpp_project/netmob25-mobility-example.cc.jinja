@@ -1,183 +1,96 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
- * Copyright (c) 2024 {{ experiment_name }} - ML Mobility NS3 Project
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Simple test for Netmob25 trajectory generation
  */
 
-#include "ns3/applications-module.h"
 #include "ns3/core-module.h"
-#include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
-#include "ns3/network-module.h"
-#include "ns3/wifi-module.h"
-#include "ns3/netanim-module.h"
 #include "ns3/netmob25-mobility-model.h"
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE ("Netmob25MobilityExample");
+NS_LOG_COMPONENT_DEFINE ("Netmob25SimpleTest");
 
-/**
- * \brief Example of using Netmob25MobilityModel with WiFi network
- * 
- * This example demonstrates:
- * - Setting up nodes with Netmob25MobilityModel
- * - Creating WiFi ad-hoc network
- * - Running UDP echo applications
- * - Generating animation output for NetAnim
- * - Using ML-generated trajectories (experiment: {{ experiment_name }})
- */
 int
 main (int argc, char *argv[])
 {
-  // Command line parameters
-  uint32_t nNodes = 4;
-  double simTime = 30.0;
-  bool verbose = false;
-  double printInterval = 5.0;
-  bool enablePcap = false;
-  std::string animationFile = "netmob25-animation.xml";
+  uint32_t nNodes = 1;
+  double simTime = 10.0;
   
   CommandLine cmd (__FILE__);
   cmd.AddValue ("nNodes", "Number of nodes", nNodes);
   cmd.AddValue ("simTime", "Simulation time (seconds)", simTime);
-  cmd.AddValue ("verbose", "Enable verbose logging", verbose);
-  cmd.AddValue ("printInterval", "Interval for printing positions (seconds)", printInterval);
-  cmd.AddValue ("enablePcap", "Enable PCAP tracing", enablePcap);
-  cmd.AddValue ("animationFile", "NetAnim output file", animationFile);
   cmd.Parse (argc, argv);
 
-  if (verbose)
-    {
-      LogComponentEnable ("Netmob25MobilityModel", LOG_LEVEL_INFO);
-      LogComponentEnable ("Netmob25MobilityExample", LOG_LEVEL_INFO);
-    }
+  // Enable debug logging
+  LogComponentEnable ("Netmob25MobilityModel", LOG_LEVEL_INFO);
+
+  std::cout << "=== Netmob25 Simple Trajectory Test ===" << std::endl;
+  std::cout << "Testing trajectory generation with " << nNodes << " nodes" << std::endl;
+  std::cout << "Simulation time: " << simTime << " seconds" << std::endl;
+  std::cout << "Model path: model.pt" << std::endl;
+  std::cout << "========================================" << std::endl;
 
   // Create nodes
   NodeContainer nodes;
   nodes.Create (nNodes);
 
-  // Setup WiFi
-  WifiHelper wifi;
-  wifi.SetStandard (WIFI_STANDARD_80211n);
-
-  WifiMacHelper mac;
-  mac.SetType ("ns3::AdhocWifiMac");
-
-  YansWifiPhyHelper phy;
-  YansWifiChannelHelper channel = YansWifiChannelHelper::Default ();
-  phy.SetChannel (channel.Create ());
-
-  NetDeviceContainer devices = wifi.Install (phy, mac, nodes);
-
-  // Setup mobility
+  // Setup mobility with Netmob25MobilityModel
   MobilityHelper mobility;
   
-  // Install Netmob25MobilityModel on all nodes
+  // Configure the model with explicit parameters
   mobility.SetMobilityModel ("ns3::Netmob25MobilityModel",
                             "StartTime", TimeValue (Seconds (0.0)),
-                            "UpdateInterval", TimeValue (Seconds (1.0)),
-                            "ScaleX", DoubleValue (1000.0),
-                            "ScaleY", DoubleValue (1000.0),
+                            "UpdateInterval", TimeValue (Seconds (0.5)),  // Update every 0.5s
+                            "ScaleX", DoubleValue (100.0),  // Smaller scale for testing
+                            "ScaleY", DoubleValue (100.0),
                             "UseMLGeneration", BooleanValue (true),
-                            "ModelPath", StringValue ("model.p"));
+                            "ModelPath", StringValue ("model.pt"));
   
   mobility.Install (nodes);
 
-  // ML generation is always enabled - trajectories loaded from model.p
-
-  // Install Internet stack
-  InternetStackHelper stack;
-  stack.Install (nodes);
-
-  // Assign IP addresses
-  Ipv4AddressHelper address;
-  address.SetBase ("10.1.1.0", "255.255.255.0");
-  Ipv4InterfaceContainer interfaces = address.Assign (devices);
-
-  // Setup applications (UDP echo)
-  uint16_t port = 9;
-
-  // Server on node 0
-  UdpEchoServerHelper server (port);
-  ApplicationContainer serverApp = server.Install (nodes.Get (0));
-  serverApp.Start (Seconds (1.0));
-  serverApp.Stop (Seconds (simTime));
-
-  // Clients on other nodes
-  for (uint32_t i = 1; i < nNodes; ++i)
-    {
-      UdpEchoClientHelper client (interfaces.GetAddress (0), port);
-      client.SetAttribute ("MaxPackets", UintegerValue (100));
-      client.SetAttribute ("Interval", TimeValue (Seconds (2.0)));
-      client.SetAttribute ("PacketSize", UintegerValue (1024));
-
-      ApplicationContainer clientApp = client.Install (nodes.Get (i));
-      clientApp.Start (Seconds (2.0 + i * 0.5));
-      clientApp.Stop (Seconds (simTime));
-    }
-
-  // Enable tracing if requested
-  if (enablePcap)
-    {
-      phy.EnablePcapAll ("netmob25-pcap");
-    }
-
-  // Position printing callback
+  // Position printing function
   auto printPositions = [&nodes, nNodes]() {
-    std::cout << "Time: " << Simulator::Now ().GetSeconds () << "s - Node positions:" << std::endl;
+    std::cout << "\n[" << Simulator::Now ().GetSeconds () << "s] Node positions:" << std::endl;
     for (uint32_t i = 0; i < nNodes; ++i)
       {
-        Ptr<MobilityModel> mobility = nodes.Get (i)->GetObject<MobilityModel> ();
-        Vector pos = mobility->GetPosition ();
-        std::cout << "  Node " << i << ": (" << pos.x << ", " << pos.y << ")" << std::endl;
+        Ptr<MobilityModel> mob = nodes.Get (i)->GetObject<MobilityModel> ();
+        if (mob)
+          {
+            Vector pos = mob->GetPosition ();
+            Vector vel = mob->GetVelocity ();
+            std::cout << "  Node " << i << ": Position(" << pos.x << ", " << pos.y << ", " << pos.z 
+                      << ") Velocity(" << vel.x << ", " << vel.y << ", " << vel.z << ")" << std::endl;
+          }
+        else
+          {
+            std::cout << "  Node " << i << ": No mobility model!" << std::endl;
+          }
       }
-    std::cout << std::endl;
   };
 
-  // Schedule position printing
-  for (double t = printInterval; t < simTime; t += printInterval)
+  // Print initial positions
+  std::cout << "\nInitial positions:" << std::endl;
+  printPositions();
+
+  // Schedule position printing every second
+  for (double t = 1.0; t <= simTime; t += 1.0)
     {
       Simulator::Schedule (Seconds (t), printPositions);
     }
 
-  // Enable NetAnim animation
-  AnimationInterface anim (animationFile);
-  
-  // Set node descriptions for animation
-  for (uint32_t i = 0; i < nNodes; ++i)
-    {
-      anim.UpdateNodeDescription (nodes.Get (i), "Node-" + std::to_string (i));
-      anim.UpdateNodeColor (nodes.Get (i), 0, 255, 0); // Green nodes
-    }
-  
-  // Set background image bounds (adjust as needed)
-  anim.SetMaxPktsPerTraceFile (500000);
-
-  std::cout << "=== Netmob25 Mobility Example ===" << std::endl;
-  std::cout << "Nodes: " << nNodes << std::endl;
-  std::cout << "Simulation time: " << simTime << " seconds" << std::endl;
-  std::cout << "ML Generation: Enabled" << std::endl;
-  std::cout << "Model path: model.p" << std::endl;
-  std::cout << "Animation file: " << animationFile << std::endl;
-  std::cout << "Experiment: {{ experiment_name }}" << std::endl;
-  std::cout << "==============================" << std::endl;
-
   // Run simulation
+  std::cout << "\nStarting simulation..." << std::endl;
   Simulator::Stop (Seconds (simTime));
   Simulator::Run ();
+  
+  // Print final positions
+  std::cout << "\nFinal positions:" << std::endl;
+  printPositions();
+  
   Simulator::Destroy ();
 
-  std::cout << "Simulation completed!" << std::endl;
-  std::cout << "Generated animation: " << animationFile << std::endl;
+  std::cout << "\nSimulation completed!" << std::endl;
   
   return 0;
 }

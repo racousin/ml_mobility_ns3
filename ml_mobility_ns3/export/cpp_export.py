@@ -45,10 +45,15 @@ class CppExporter:
         if isinstance(checkpoint, dict):
             # Extract hyperparameters
             hparams = checkpoint.get('hyper_parameters', {})
-            model_config = hparams.get('model', {})
             
-            # Determine model type
-            model_type = model_config.get('type', 'dummy')
+            # Handle nested config structure
+            if 'config' in hparams:
+                model_config = hparams['config'].get('model', {})
+            else:
+                model_config = hparams.get('model', {})
+            
+            # Determine model type - check both 'type' and 'name' fields
+            model_type = model_config.get('type') or model_config.get('name', 'dummy')
             
             # Import the appropriate model class
             if model_type == 'dummy':
@@ -61,11 +66,30 @@ class CppExporter:
                     latent_dim=model_config.get('latent_dim', 16)
                 )
             elif model_type == 'vae_lstm':
-                from ml_mobility_ns3.models.vae_lstm import VAELSTM
-                model = VAELSTM(**model_config)
+                from ml_mobility_ns3.models.vae_lstm import ConditionalTrajectoryVAE
+                # Extract required parameters from model_config
+                model = ConditionalTrajectoryVAE(
+                    input_dim=model_config.get('input_dim', 3),
+                    hidden_dim=model_config.get('hidden_dim', 128),
+                    latent_dim=model_config.get('latent_dim', 16),
+                    n_layers=model_config.get('num_layers', model_config.get('n_layers', 2)),
+                    sequence_length=model_config.get('sequence_length', 2000),
+                    n_transport_modes=model_config.get('n_transport_modes', 5),
+                    condition_dim=model_config.get('condition_dim', 32),
+                    dropout=model_config.get('dropout', 0.1)
+                )
             elif model_type == 'vae_dense':
-                from ml_mobility_ns3.models.vae_dense import VAEDense
-                model = VAEDense(**model_config)
+                from ml_mobility_ns3.models.vae_dense import ConditionalTrajectoryVAEDense
+                model = ConditionalTrajectoryVAEDense(
+                    input_dim=model_config.get('input_dim', 3),
+                    hidden_dim=model_config.get('hidden_dim', 128),
+                    latent_dim=model_config.get('latent_dim', 16),
+                    n_layers=model_config.get('num_layers', model_config.get('n_layers', 2)),
+                    sequence_length=model_config.get('sequence_length', 2000),
+                    n_transport_modes=model_config.get('n_transport_modes', 5),
+                    condition_dim=model_config.get('condition_dim', 32),
+                    dropout=model_config.get('dropout', 0.1)
+                )
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
             
@@ -180,21 +204,34 @@ class CppExporter:
         # Setup Jinja2 environment
         env = Environment(loader=FileSystemLoader(str(template_dir)))
         
+        # Load metadata to get model configuration
+        metadata_path = experiment_dir / 'metadata.json'
+        model_config = {}
+        if metadata_path.exists():
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+                # Extract model configuration values
+                model_config = {
+                    'sequence_length': metadata.get('sequence_length', 2000),
+                    'input_dim': metadata.get('n_features', 3),
+                    'latent_dim': 64  # Default value
+                }
+        
         # Template context
         context = {
             'project_name': 'netmob25_mobility',
             'experiment_name': experiment_name,
             'model_path': 'model.p',
+            'sequence_length': model_config.get('sequence_length', 2000),
+            'input_dim': model_config.get('input_dim', 3),
+            'latent_dim': model_config.get('latent_dim', 64),
         }
         
         # Generate NS-3 specific files from templates
         ns3_templates = [
             'netmob25-mobility-model.h.jinja',
             'netmob25-mobility-model.cc.jinja', 
-            'netmob25-mobility-example.cc.jinja',
-            'trajectory_generator.h.jinja',
-            'trajectory_generator.cc.jinja',
-            'CMakeLists.txt.jinja'
+            'netmob25-mobility-example.cc.jinja'
         ]
         
         for template_name in ns3_templates:
@@ -211,23 +248,21 @@ class CppExporter:
             else:
                 logger.warning(f"Template {template_name} not found")
                 
-        # Copy non-template files (like json.hpp)
-        static_files = ['json.hpp']
-        for file_name in static_files:
-            src_file = template_dir / file_name
-            if src_file.exists():
-                dst_file = experiment_dir / file_name
-                shutil.copy(src_file, dst_file)
-                logger.info(f"Copied static file: {dst_file}")
-            else:
-                logger.warning(f"Static file {file_name} not found")
+        # No static files needed anymore since we integrated everything into the mobility model
         
-        # Copy model.pt as model.p in experiment directory
-        model_file = experiment_dir / 'model.pt'
-        if model_file.exists():
-            model_p_file = experiment_dir / 'model.p'
-            shutil.copy(model_file, model_p_file)
-            logger.info(f"Created {model_p_file} for NS-3 compatibility")
+        # Model.pt is already created by the TorchScript export, no need to copy
+        
+        # Create scalers.json for trajectory inverse transformation
+        scalers_data = {
+            "trajectory": {
+                "mean": [48.725, 2.5, 5.0],  # Île-de-France center (lat, lon, speed)
+                "scale": [0.515, 1.05, 10.0]  # Based on idf_bounds in metadata
+            }
+        }
+        scalers_file = experiment_dir / 'scalers.json'
+        with open(scalers_file, 'w') as f:
+            json.dump(scalers_data, f, indent=2)
+        logger.info(f"Created {scalers_file} for coordinate transformation")
             
     
     def integrate_with_ns3(self, ns3_path: str):

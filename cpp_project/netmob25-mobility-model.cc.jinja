@@ -12,7 +12,7 @@
 #include "ns3/string.h"
 
 #ifdef HAVE_LIBTORCH
-#include "trajectory_generator.h"
+#include <iostream>
 #endif
 
 namespace ns3 {
@@ -262,21 +262,59 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
     {
       NS_LOG_INFO ("Generating trajectory using ML model: " << m_modelPath);
       
-      TrajectoryGenerator generator (m_modelPath);
-      auto mlTrajectory = generator.generate (1, 200); // Generate 1 trajectory with 200 points
-      
-      m_trajectory.clear ();
-      
-      // Convert from tensor to Vector format
-      for (size_t i = 0; i < mlTrajectory.size (1); ++i)
+      // Load model if not already loaded
+      if (!m_modelLoaded)
         {
-          float x = mlTrajectory[0][i][0].item<float> ();
-          float y = mlTrajectory[0][i][1].item<float> ();
-          m_trajectory.push_back (Vector (x, y, 0.0));
+          LoadModel ();
         }
       
-      m_totalSteps = m_trajectory.size ();
-      NS_LOG_INFO ("Generated ML trajectory with " << m_totalSteps << " points");
+      // Generate trajectory points
+      int sequence_length = 200;
+      auto points = GenerateFromModel (sequence_length);
+      
+      if (!points.empty ())
+        {
+          m_trajectory.clear ();
+          
+          // Convert generated points to NS-3 coordinates
+          // Set reference point (center of Île-de-France region)
+          double refLat = 48.725;
+          double refLon = 2.5;
+          double refAlt = 0.0;
+          
+          for (const auto& point : points)
+            {
+              double lat = point[0];  // latitude
+              double lon = point[1];  // longitude
+              double alt = 0.0;      // altitude set to 0
+              
+              // Convert GPS (lat, lon, alt) to ECEF coordinates
+              Vector ecefPos = GeographicPositions::GeographicToCartesianCoordinates (
+                  lat, lon, alt,
+                  GeographicPositions::WGS84);
+              
+              // Convert reference point to ECEF
+              Vector ecefRef = GeographicPositions::GeographicToCartesianCoordinates (
+                  refLat, refLon, refAlt,
+                  GeographicPositions::WGS84);
+              
+              // Calculate local offset from reference point
+              Vector localPos = ecefPos - ecefRef;
+              
+              // Apply scaling and add to trajectory
+              m_trajectory.push_back (Vector (localPos.x * m_scaleX, 
+                                             localPos.y * m_scaleY, 
+                                             0.0));
+            }
+          
+          m_totalSteps = m_trajectory.size ();
+          NS_LOG_INFO ("Generated ML trajectory with " << m_totalSteps << " points");
+        }
+      else
+        {
+          NS_LOG_ERROR ("Failed to generate trajectory - empty result");
+          NS_LOG_WARN ("Falling back to default trajectory");
+        }
     }
   catch (const std::exception& e)
     {
@@ -287,5 +325,122 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
   NS_LOG_WARN ("LibTorch not available, cannot use ML generation");
 #endif
 }
+
+#ifdef HAVE_LIBTORCH
+void
+Netmob25MobilityModel::LoadModel (void)
+{
+  NS_LOG_FUNCTION (this);
+  
+  try
+    {
+      // Load the TorchScript model
+      m_model = torch::jit::load (m_modelPath);
+      m_model.to (m_device);
+      m_model.eval ();
+      
+      m_modelLoaded = true;
+      NS_LOG_INFO ("Model loaded successfully from: " << m_modelPath);
+    }
+  catch (const c10::Error& e)
+    {
+      NS_LOG_ERROR ("Error loading model: " << e.what ());
+      throw std::runtime_error ("Error loading model: " + std::string (e.what ()));
+    }
+}
+
+std::vector<std::vector<double>>
+Netmob25MobilityModel::GenerateFromModel (int sequence_length)
+{
+  NS_LOG_FUNCTION (this << sequence_length);
+  
+  if (!m_modelLoaded)
+    {
+      throw std::runtime_error ("Model not loaded!");
+    }
+  
+  std::vector<std::vector<double>> trajectory;
+  
+  // Disable gradient computation for inference
+  torch::NoGradGuard no_grad;
+  
+  try
+    {
+      // Create input trajectory tensor (random noise as starting point)
+      // The model expects (batch_size, sequence_length, input_dim)
+      int input_dim = 3;  // lat, lon, speed
+      torch::Tensor x = torch::randn ({1, sequence_length, input_dim}, m_device);
+      
+      // Create transport mode tensor (0 for WALKING)
+      torch::Tensor transport_mode = torch::zeros ({1}, torch::kLong).to (m_device);
+      
+      // Create length tensor
+      torch::Tensor length = torch::tensor ({sequence_length}, torch::kLong).to (m_device);
+      
+      // Forward pass through the model
+      std::vector<torch::jit::IValue> inputs;
+      inputs.push_back (x);
+      inputs.push_back (transport_mode);
+      inputs.push_back (length);
+      
+      // Get output
+      auto output = m_model.forward (inputs);
+      torch::Tensor traj_tensor;
+      
+      // Handle different output types
+      if (output.isTensor ())
+        {
+          traj_tensor = output.toTensor ();
+        }
+      else if (output.isTuple ())
+        {
+          auto tuple = output.toTuple ();
+          if (tuple->elements ().size () > 0)
+            {
+              traj_tensor = tuple->elements ()[0].toTensor ();
+            }
+        }
+      
+      // Move to CPU and convert to vector
+      traj_tensor = traj_tensor.to (torch::kCPU);
+      
+      // Check tensor dimensions and extract data
+      if (traj_tensor.dim () == 3)
+        {
+          // [batch, seq_len, features]
+          auto accessor = traj_tensor.accessor<float, 3> ();
+          for (int i = 0; i < accessor.size (1) && i < sequence_length; i++)
+            {
+              std::vector<double> point;
+              // Extract lat and lon (first two features)
+              point.push_back (static_cast<double> (accessor[0][i][0])); // lat
+              point.push_back (static_cast<double> (accessor[0][i][1])); // lon
+              trajectory.push_back (point);
+            }
+        }
+      else if (traj_tensor.dim () == 2)
+        {
+          // [seq_len, features]
+          auto accessor = traj_tensor.accessor<float, 2> ();
+          for (int i = 0; i < accessor.size (0) && i < sequence_length; i++)
+            {
+              std::vector<double> point;
+              point.push_back (static_cast<double> (accessor[i][0])); // lat
+              point.push_back (static_cast<double> (accessor[i][1])); // lon
+              trajectory.push_back (point);
+            }
+        }
+      
+      NS_LOG_INFO ("Generated " << trajectory.size () << " trajectory points");
+    }
+  catch (const c10::Error& e)
+    {
+      NS_LOG_ERROR ("Error during inference: " << e.what ());
+      throw std::runtime_error ("Error during inference: " + std::string (e.what ()));
+    }
+  
+  return trajectory;
+}
+#endif
 
 } // namespace ns3

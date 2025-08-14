@@ -23,8 +23,14 @@
 #include "ns3/event-id.h"
 #include "ns3/nstime.h"
 #include "ns3/vector.h"
+#include "ns3/geographic-positions.h"
 #include <vector>
 #include <cmath>
+
+#ifdef HAVE_LIBTORCH
+#include <torch/script.h>
+#include <map>
+#endif
 
 namespace ns3 {
 
@@ -93,6 +99,18 @@ private:
    */
   void GenerateMLTrajectory (void);
 
+#ifdef HAVE_LIBTORCH
+  /**
+   * \brief Load the ML model
+   */
+  void LoadModel (void);
+  
+  /**
+   * \brief Generate trajectory from the ML model
+   */
+  std::vector<std::vector<double>> GenerateFromModel (int sequence_length);
+#endif
+
   // Trajectory data
   std::vector<Vector> m_trajectory;
   uint32_t m_currentStep;
@@ -116,6 +134,13 @@ private:
   Vector m_currentVelocity;
   mutable Time m_lastUpdate;
   bool m_initialized;
+
+#ifdef HAVE_LIBTORCH
+  // ML model
+  torch::jit::script::Module m_model;
+  torch::Device m_device = torch::kCPU;
+  bool m_modelLoaded = false;
+#endif
 };
 
 } // namespace ns3
