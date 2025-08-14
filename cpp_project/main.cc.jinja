@@ -1,98 +1,44 @@
 #include "trajectory_generator.h"
 #include <iostream>
-#include <iomanip>
+#include <torch/torch.h>
+#include <torch/script.h>
 
 int main() {
     try {
         std::cout << "=== {{ experiment_name }} Trajectory Generator ===" << std::endl;
+        std::cout << "Loading model from: {{ model_path }}" << std::endl;
         
-        TrajectoryGenerator generator(
-            "./traced_vae_model.pt",
-            "./metadata.json",
-            "./scalers.json"
-        );
-
-        // Generate trajectories for different transport modes
-        std::vector<std::string> test_modes = {
-            {% for mode in transport_modes %}"{{ mode }}"{% if not loop.last %},{% endif %}
-            {% endfor %}
-        };
+        // Initialize generator
+        TrajectoryGenerator generator("{{ model_path }}");
         
-        for (const auto& mode : test_modes) {
-            std::cout << "\n--- Testing mode: " << mode << " ---" << std::endl;
-            
-            try {
-                auto trajectories = generator.generate(mode, 200, 3);  // Generate 3 shorter trajectories for testing
-                
-                std::cout << "Generated " << trajectories.size() << " trajectories" << std::endl;
-                
-                for (size_t t = 0; t < trajectories.size(); ++t) {
-                    const auto& traj = trajectories[t];
-                    std::cout << "\n  Trajectory " << (t + 1) << ":" << std::endl;
-                    std::cout << "    Points: " << traj.points.size() << ", Mode: " << traj.mode << ", Length: " << traj.length << std::endl;
-                    
-                    // Show first 3 points for each trajectory
-                    std::cout << "    First 3 points:" << std::endl;
-                    for (size_t i = 0; i < 3 && i < traj.points.size(); ++i) {
-                        std::cout << "      Point " << i << ": [";
-                        std::cout << std::fixed << std::setprecision(6);
-                        std::cout << "lat=" << traj.points[i][0];
-                        std::cout << ", lon=" << traj.points[i][1];
-                        std::cout << ", speed=" << traj.points[i][2];
-                        std::cout << "]" << std::endl;
-                    }
-                    
-                    // Show statistics for this trajectory
-                    if (!traj.points.empty()) {
-                        double min_lat = traj.points[0][0], max_lat = traj.points[0][0];
-                        double min_lon = traj.points[0][1], max_lon = traj.points[0][1];
-                        double min_speed = traj.points[0][2], max_speed = traj.points[0][2];
-                        double avg_speed = 0.0;
-                        
-                        for (const auto& point : traj.points) {
-                            min_lat = std::min(min_lat, point[0]);
-                            max_lat = std::max(max_lat, point[0]);
-                            min_lon = std::min(min_lon, point[1]);
-                            max_lon = std::max(max_lon, point[1]);
-                            min_speed = std::min(min_speed, point[2]);
-                            max_speed = std::max(max_speed, point[2]);
-                            avg_speed += point[2];
-                        }
-                        avg_speed /= traj.points.size();
-                        
-                        std::cout << "    Statistics:" << std::endl;
-                        std::cout << "      Lat range: [" << std::fixed << std::setprecision(4) << min_lat << ", " << max_lat << "]" << std::endl;
-                        std::cout << "      Lon range: [" << min_lon << ", " << max_lon << "]" << std::endl;
-                        std::cout << "      Speed range: [" << std::setprecision(2) << min_speed << ", " << max_speed << "] km/h" << std::endl;
-                        std::cout << "      Average speed: " << avg_speed << " km/h" << std::endl;
-                    }
+        // Test generation
+        std::cout << "\nGenerating test trajectories..." << std::endl;
+        
+        // Generate a batch of trajectories
+        int batch_size = 5;
+        int sequence_length = 100;
+        
+        auto trajectories = generator.generate(batch_size, sequence_length);
+        
+        std::cout << "Generated " << trajectories.size(0) << " trajectories" << std::endl;
+        std::cout << "Trajectory shape: [" << trajectories.size(0) << ", " 
+                  << trajectories.size(1) << ", " << trajectories.size(2) << "]" << std::endl;
+        
+        // Print first trajectory sample
+        if (trajectories.size(0) > 0) {
+            std::cout << "\nFirst trajectory (first 5 points):" << std::endl;
+            for (int i = 0; i < std::min(5L, trajectories.size(1)); i++) {
+                std::cout << "  Point " << i << ": [";
+                for (int j = 0; j < trajectories.size(2); j++) {
+                    std::cout << trajectories[0][i][j].item<float>();
+                    if (j < trajectories.size(2) - 1) std::cout << ", ";
                 }
-                
-                // Summary statistics across all trajectories for this mode
-                if (!trajectories.empty()) {
-                    double total_avg_speed = 0.0;
-                    for (const auto& traj : trajectories) {
-                        double traj_avg = 0.0;
-                        for (const auto& point : traj.points) {
-                            traj_avg += point[2];
-                        }
-                        traj_avg /= traj.points.size();
-                        total_avg_speed += traj_avg;
-                    }
-                    total_avg_speed /= trajectories.size();
-                    
-                    std::cout << "\n  Mode " << mode << " Summary:" << std::endl;
-                    std::cout << "    Average speed across all trajectories: " << std::fixed << std::setprecision(2) << total_avg_speed << " km/h" << std::endl;
-                }
-                
-            } catch (const std::exception& e) {
-                std::cerr << "Error generating trajectory for mode " << mode << ": " << e.what() << std::endl;
+                std::cout << "]" << std::endl;
             }
         }
         
-        std::cout << "\n=== Generation Complete ===" << std::endl;
-        std::cout << "All transport modes tested successfully!" << std::endl;
-
+        std::cout << "\n=== Test Complete ===" << std::endl;
+        
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;

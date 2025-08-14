@@ -1,3 +1,6 @@
+ns-3.45.tar.bz2
+ns-3.45/
+
 analysis_output/
 outputs/
 libtorch/
@@ -13,6 +16,8 @@ __pycache__/
 cpp/
 experiments/
 logs/
+all_real_trajectories.html
+cpp_export/
 
 
 # Distribution / packaging

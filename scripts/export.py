@@ -1,28 +1,68 @@
 #!/usr/bin/env python
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 import torch
 from pathlib import Path
 import sys
+import pickle
+import json
+import logging
 
 sys.path.append(str(Path(__file__).parent.parent))
 from ml_mobility_ns3.export.cpp_export import CppExporter
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
-    # Load model
-    checkpoint_path = Path(cfg.training.checkpoint_dir) / 'best_model.ckpt'
-    model = torch.load(checkpoint_path)
+    # Handle experiment_id parameter
+    if hasattr(cfg, 'experiment_id'):
+        experiment_dir = Path('experiments') / cfg.experiment_id
+        if not experiment_dir.exists():
+            raise ValueError(f"Experiment {cfg.experiment_id} not found")
+        
+        # Load checkpoint from experiment
+        checkpoint_path = experiment_dir / 'checkpoints' / 'best_model.ckpt'
+        if not checkpoint_path.exists():
+            checkpoint_path = experiment_dir / 'checkpoints' / 'last.ckpt'
+        
+        # Load experiment config
+        with open(experiment_dir / 'config.yaml', 'r') as f:
+            experiment_cfg = OmegaConf.load(f)
+            # Create a new config with structured merging disabled
+            cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+            OmegaConf.set_struct(cfg, False)
+            cfg = OmegaConf.merge(cfg, experiment_cfg)
+    else:
+        # Use default checkpoint path
+        checkpoint_path = Path(cfg.get('checkpoint_path', 'best_model.ckpt'))
     
-    # Load metadata
-    metadata_path = Path(cfg.data.output_dir) / 'metadata.pkl'
-    with open(metadata_path, 'rb') as f:
-        metadata = pickle.load(f)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    
+    logger.info(f"Loading model from {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    
+    # Extract model state from checkpoint
+    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+        model_state = checkpoint['state_dict']
+        hyper_parameters = checkpoint.get('hyper_parameters', {})
+    else:
+        model_state = checkpoint
+        hyper_parameters = {}
+    
+    # Load metadata if available
+    metadata_path = Path('data/processed/metadata.pkl')
+    metadata = {}
+    if metadata_path.exists():
+        with open(metadata_path, 'rb') as f:
+            metadata = pickle.load(f)
     
     # Export
     exporter = CppExporter(cfg)
-    exporter.export_model(model, metadata)
+    exporter.export_model(checkpoint, metadata, str(checkpoint_path.parent.parent))
     
 
 if __name__ == "__main__":
