@@ -8,7 +8,6 @@
 #include "ns3/log.h"
 #include "ns3/double.h"
 #include "ns3/uinteger.h"
-#include "ns3/boolean.h"
 #include "ns3/string.h"
 
 #ifdef HAVE_LIBTORCH
@@ -39,25 +38,30 @@ Netmob25MobilityModel::GetTypeId (void)
                    MakeTimeAccessor (&Netmob25MobilityModel::m_updateInterval),
                    MakeTimeChecker ())
     .AddAttribute ("ScaleX",
-                   "Scaling factor for X coordinates (meters)",
-                   DoubleValue (1000.0),
+                   "Deprecated - no longer used",
+                   DoubleValue (1.0),
                    MakeDoubleAccessor (&Netmob25MobilityModel::m_scaleX),
                    MakeDoubleChecker<double> ())
     .AddAttribute ("ScaleY",
-                   "Scaling factor for Y coordinates (meters)", 
-                   DoubleValue (1000.0),
+                   "Deprecated - no longer used", 
+                   DoubleValue (1.0),
                    MakeDoubleAccessor (&Netmob25MobilityModel::m_scaleY),
                    MakeDoubleChecker<double> ())
-    .AddAttribute ("UseMLGeneration",
-                   "Whether to use ML model for trajectory generation",
-                   BooleanValue (false),
-                   MakeBooleanAccessor (&Netmob25MobilityModel::m_useMLGeneration),
-                   MakeBooleanChecker ())
     .AddAttribute ("ModelPath",
-                   "Path to the ML model file (model.p)",
-                   StringValue ("model.p"),
+                   "Path to the ML model file (model.pt)",
+                   StringValue ("model.pt"),
                    MakeStringAccessor (&Netmob25MobilityModel::m_modelPath),
-                   MakeStringChecker ());
+                   MakeStringChecker ())
+    .AddAttribute ("TransportMode",
+                   "Transport mode for trajectory generation (WALKING, CYCLING, DRIVING, TRANSPORT)",
+                   StringValue ("WALKING"),
+                   MakeStringAccessor (&Netmob25MobilityModel::m_transportMode),
+                   MakeStringChecker ())
+    .AddAttribute ("TripLength",
+                   "Number of trajectory points to generate (max 2000)",
+                   UintegerValue (200),
+                   MakeUintegerAccessor (&Netmob25MobilityModel::m_tripLength),
+                   MakeUintegerChecker<uint32_t> (1, 2000));
   return tid;
 }
 
@@ -66,10 +70,11 @@ Netmob25MobilityModel::Netmob25MobilityModel ()
     m_totalSteps (0),
     m_startTime (Seconds (0.0)),
     m_updateInterval (Seconds (1.0)),
-    m_scaleX (1000.0),
-    m_scaleY (1000.0),
-    m_useMLGeneration (false),
-    m_modelPath ("model.p"),
+    m_scaleX (1.0),
+    m_scaleY (1.0),
+    m_modelPath ("model.pt"),
+    m_transportMode ("WALKING"),
+    m_tripLength (200),
     m_currentPosition (Vector (0.0, 0.0, 0.0)),
     m_currentVelocity (Vector (0.0, 0.0, 0.0)),
     m_lastUpdate (Seconds (0.0)),
@@ -103,13 +108,6 @@ Netmob25MobilityModel::SetTrajectory (const std::vector<Vector>& trajectory)
 }
 
 void
-Netmob25MobilityModel::SetUseMLGeneration (bool useML)
-{
-  NS_LOG_FUNCTION (this << useML);
-  m_useMLGeneration = useML;
-}
-
-void
 Netmob25MobilityModel::SetModelPath (const std::string& modelPath)
 {
   NS_LOG_FUNCTION (this << modelPath);
@@ -133,7 +131,8 @@ Netmob25MobilityModel::DoGetPosition (void) const
   
   if (!m_initialized)
     {
-      return Vector (0.0, 0.0, 0.0);
+      // Initialize on first access
+      const_cast<Netmob25MobilityModel*>(this)->Initialize ();
     }
     
   return m_currentPosition;
@@ -165,36 +164,22 @@ Netmob25MobilityModel::Initialize (void)
       return;
     }
   
-  // Generate or load trajectory
-  if (m_useMLGeneration && m_trajectory.empty ())
-    {
-      GenerateMLTrajectory ();
-    }
-  
-  // Use default trajectory if none provided
+  // Always generate trajectory using ML model if empty
   if (m_trajectory.empty ())
     {
-      NS_LOG_WARN ("No trajectory data available, using default pattern");
-      // Create a simple default trajectory (circle)
-      uint32_t numPoints = 100;
-      double radius = 500.0; // 500 meters radius
-      for (uint32_t i = 0; i < numPoints; ++i)
+      NS_LOG_INFO ("Generating trajectory with ML model");
+      GenerateMLTrajectory ();
+      
+      if (m_trajectory.empty ())
         {
-          double angle = 2.0 * M_PI * i / numPoints;
-          Vector pos (radius * cos (angle), radius * sin (angle), 0.0);
-          m_trajectory.push_back (pos);
+          NS_LOG_ERROR ("Failed to generate ML trajectory - no fallback available");
         }
-      m_totalSteps = m_trajectory.size ();
     }
   
   // Set initial position
   if (!m_trajectory.empty ())
     {
-      m_currentPosition = Vector (
-        m_trajectory[0].x * m_scaleX,
-        m_trajectory[0].y * m_scaleY,
-        0.0
-      );
+      m_currentPosition = m_trajectory[0];
     }
   
   // Schedule first update
@@ -219,11 +204,7 @@ Netmob25MobilityModel::UpdatePosition (void)
       Vector oldPosition = m_currentPosition;
       
       // Update position from trajectory
-      m_currentPosition = Vector (
-        m_trajectory[m_currentStep].x * m_scaleX,
-        m_trajectory[m_currentStep].y * m_scaleY,
-        0.0
-      );
+      m_currentPosition = m_trajectory[m_currentStep];
       
       // Calculate velocity
       Time timeDelta = m_updateInterval;
@@ -268,9 +249,8 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
           LoadModel ();
         }
       
-      // Generate trajectory points
-      int sequence_length = 200;
-      auto points = GenerateFromModel (sequence_length);
+      // Generate trajectory points using configured trip length
+      auto points = GenerateFromModel (m_tripLength);
       
       if (!points.empty ())
         {
@@ -280,31 +260,22 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
           // Set reference point (center of Île-de-France region)
           double refLat = 48.725;
           double refLon = 2.5;
-          double refAlt = 0.0;
           
           for (const auto& point : points)
             {
-              double lat = point[0];  // latitude
-              double lon = point[1];  // longitude
-              double alt = 0.0;      // altitude set to 0
+              // Unscale the model outputs (model outputs are normalized)
+              // Original data: lat ~ N(48.725, 0.515), lon ~ N(2.5, 1.05)
+              double lat = point[0] * 0.515 + 48.725;  // unscale latitude
+              double lon = point[1] * 1.05 + 2.5;      // unscale longitude
               
-              // Convert GPS (lat, lon, alt) to ECEF coordinates
-              Vector ecefPos = GeographicPositions::GeographicToCartesianCoordinates (
-                  lat, lon, alt,
-                  GeographicPositions::WGS84);
+              // Convert GPS coordinates to local meters using simple approximation
+              // At latitude 48.725°, 1 degree latitude ≈ 111.3 km
+              // 1 degree longitude ≈ 69.4 km
+              double x = (lon - refLon) * 69400.0;  // Convert longitude difference to meters
+              double y = (lat - refLat) * 111300.0; // Convert latitude difference to meters
               
-              // Convert reference point to ECEF
-              Vector ecefRef = GeographicPositions::GeographicToCartesianCoordinates (
-                  refLat, refLon, refAlt,
-                  GeographicPositions::WGS84);
-              
-              // Calculate local offset from reference point
-              Vector localPos = ecefPos - ecefRef;
-              
-              // Apply scaling and add to trajectory
-              m_trajectory.push_back (Vector (localPos.x * m_scaleX, 
-                                             localPos.y * m_scaleY, 
-                                             0.0));
+              // Add to trajectory (no additional scaling needed)
+              m_trajectory.push_back (Vector (x, y, 0.0));
             }
           
           m_totalSteps = m_trajectory.size ();
@@ -313,13 +284,11 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
       else
         {
           NS_LOG_ERROR ("Failed to generate trajectory - empty result");
-          NS_LOG_WARN ("Falling back to default trajectory");
         }
     }
   catch (const std::exception& e)
     {
       NS_LOG_ERROR ("Failed to generate ML trajectory: " << e.what ());
-      NS_LOG_WARN ("Falling back to default trajectory");
     }
 #else
   NS_LOG_WARN ("LibTorch not available, cannot use ML generation");
@@ -350,9 +319,9 @@ Netmob25MobilityModel::LoadModel (void)
 }
 
 std::vector<std::vector<double>>
-Netmob25MobilityModel::GenerateFromModel (int sequence_length)
+Netmob25MobilityModel::GenerateFromModel (int trip_length)
 {
-  NS_LOG_FUNCTION (this << sequence_length);
+  NS_LOG_FUNCTION (this << trip_length);
   
   if (!m_modelLoaded)
     {
@@ -368,14 +337,26 @@ Netmob25MobilityModel::GenerateFromModel (int sequence_length)
     {
       // Create input trajectory tensor (random noise as starting point)
       // The model expects (batch_size, sequence_length, input_dim)
+      int sequence_length = 2000;  // Max sequence length the model supports
       int input_dim = 3;  // lat, lon, speed
       torch::Tensor x = torch::randn ({1, sequence_length, input_dim}, m_device);
       
-      // Create transport mode tensor (0 for WALKING)
-      torch::Tensor transport_mode = torch::zeros ({1}, torch::kLong).to (m_device);
+      // Map transport mode string to index
+      int mode_idx = 0;  // Default to WALKING
+      if (m_transportMode == "WALKING") mode_idx = 0;
+      else if (m_transportMode == "CYCLING") mode_idx = 1;
+      else if (m_transportMode == "DRIVING") mode_idx = 2;
+      else if (m_transportMode == "TRANSPORT") mode_idx = 3;
+      else
+        {
+          NS_LOG_WARN ("Unknown transport mode: " << m_transportMode << ", using WALKING");
+        }
+      
+      // Create transport mode tensor
+      torch::Tensor transport_mode = torch::tensor ({mode_idx}, torch::kLong).to (m_device);
       
       // Create length tensor
-      torch::Tensor length = torch::tensor ({sequence_length}, torch::kLong).to (m_device);
+      torch::Tensor length = torch::tensor ({trip_length}, torch::kLong).to (m_device);
       
       // Forward pass through the model
       std::vector<torch::jit::IValue> inputs;
@@ -409,7 +390,7 @@ Netmob25MobilityModel::GenerateFromModel (int sequence_length)
         {
           // [batch, seq_len, features]
           auto accessor = traj_tensor.accessor<float, 3> ();
-          for (int i = 0; i < accessor.size (1) && i < sequence_length; i++)
+          for (int i = 0; i < accessor.size (1) && i < trip_length; i++)
             {
               std::vector<double> point;
               // Extract lat and lon (first two features)
@@ -422,7 +403,7 @@ Netmob25MobilityModel::GenerateFromModel (int sequence_length)
         {
           // [seq_len, features]
           auto accessor = traj_tensor.accessor<float, 2> ();
-          for (int i = 0; i < accessor.size (0) && i < sequence_length; i++)
+          for (int i = 0; i < accessor.size (0) && i < trip_length; i++)
             {
               std::vector<double> point;
               point.push_back (static_cast<double> (accessor[i][0])); // lat

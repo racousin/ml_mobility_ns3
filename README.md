@@ -122,29 +122,3 @@ CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 build
 # 4. Run the example with ML trajectory generation
 ./ns3 run "scratch/netmob25-mobility-example --nNodes=1 --simTime=10"
 ```
-
-### Expected Output
-
-The simulation will show node positions and generate an animation file:
-
-```
-=== Netmob25 Mobility Example ===
-Nodes: 4
-Simulation time: 30 seconds  
-ML Generation: Enabled
-Model path: model.p
-Animation file: netmob25-animation.xml
-Experiment: vae_lstm_2025-07-16_12-30-52
-==============================
-
-Time: 5s - Node positions:
-  Node 0: (245.3, 178.9)
-  Node 1: (312.7, 89.2)  
-  Node 2: (156.8, 234.1)
-  Node 3: (89.4, 167.5)
-
-Simulation completed!
-Generated animation: netmob25-animation.xml
-```
-
-You can visualize the mobility patterns using NetAnim with the generated XML file.

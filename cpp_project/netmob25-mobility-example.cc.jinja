@@ -41,11 +41,10 @@ main (int argc, char *argv[])
   // Configure the model with explicit parameters
   mobility.SetMobilityModel ("ns3::Netmob25MobilityModel",
                             "StartTime", TimeValue (Seconds (0.0)),
-                            "UpdateInterval", TimeValue (Seconds (0.5)),  // Update every 0.5s
-                            "ScaleX", DoubleValue (100.0),  // Smaller scale for testing
-                            "ScaleY", DoubleValue (100.0),
-                            "UseMLGeneration", BooleanValue (true),
-                            "ModelPath", StringValue ("model.pt"));
+                            "UpdateInterval", TimeValue (Seconds (2)),  // Update every 2s
+                            "ModelPath", StringValue ("model.pt"),
+                            "TransportMode", StringValue ("WALKING"),
+                            "TripLength", UintegerValue (100));
   
   mobility.Install (nodes);
 

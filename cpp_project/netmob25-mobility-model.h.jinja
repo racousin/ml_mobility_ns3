@@ -59,12 +59,6 @@ public:
   void SetTrajectory (const std::vector<Vector>& trajectory);
 
   /**
-   * \brief Set whether to use ML generation
-   * \param useML true to use ML model for trajectory generation
-   */
-  void SetUseMLGeneration (bool useML);
-
-  /**
    * \brief Set the model file path for ML generation
    * \param modelPath path to the model.p file
    */
@@ -108,7 +102,7 @@ private:
   /**
    * \brief Generate trajectory from the ML model
    */
-  std::vector<std::vector<double>> GenerateFromModel (int sequence_length);
+  std::vector<std::vector<double>> GenerateFromModel (int trip_length);
 #endif
 
   // Trajectory data
@@ -126,8 +120,9 @@ private:
   double m_scaleY;
   
   // ML generation parameters
-  bool m_useMLGeneration;
   std::string m_modelPath;
+  std::string m_transportMode;
+  int m_tripLength;
   
   // Current state
   Vector m_currentPosition;
