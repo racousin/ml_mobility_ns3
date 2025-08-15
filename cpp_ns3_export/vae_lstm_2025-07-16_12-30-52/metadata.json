@@ -1,0 +1,101 @@
+{
+  "sequence_length": 2000,
+  "n_sequences": 71666,
+  "n_features": 3,
+  "feature_names": [
+    "latitude",
+    "longitude",
+    "speed"
+  ],
+  "transport_modes": [
+    "BIKE",
+    "CAR",
+    "MIXED",
+    "PUBLIC_TRANSPORT",
+    "WALKING"
+  ],
+  "n_transport_modes": 5,
+  "mode_categories": {
+    "CAR": [
+      "TWO_WHEELER",
+      "PRIV_CAR_DRIVER",
+      "PRIV_CAR_PASSENGER",
+      "TAXI"
+    ],
+    "PUBLIC_TRANSPORT": [
+      "BUS",
+      "TRAIN",
+      "TRAIN_EXPRESS",
+      "SUBWAY",
+      "TRAMWAY"
+    ],
+    "WALKING": [
+      "WALKING"
+    ],
+    "BIKE": [
+      "BIKE",
+      "ELECT_BIKE",
+      "ELECT_SCOOTER"
+    ]
+  },
+  "scaling_method": "MinMaxScaler",
+  "idf_bounds": {
+    "lat_min": 48.21,
+    "lat_max": 49.24,
+    "lon_min": 1.45,
+    "lon_max": 3.55
+  },
+  "excluded_modes": [
+    "OTHER",
+    "PLANE",
+    "LIGHT_COMM_VEHICLE",
+    "ON_DEMAND"
+  ],
+  "filtering_stats": [
+    {
+      "step": "Filter 1: Missing date/time values",
+      "trips_before": 80697,
+      "trips_after": 76667,
+      "trips_removed": 4030,
+      "trips_removed_pct": 4.993989863315861,
+      "weight_before": 32885223.6789108,
+      "weight_after": 31864163.219540693,
+      "weight_removed": 1021060.4593701065,
+      "weight_removed_pct": 3.104921740352673
+    },
+    {
+      "step": "Filter 2: Trips < 30 seconds",
+      "trips_before": 76667,
+      "trips_after": 76667,
+      "trips_removed": 0,
+      "trips_removed_pct": 0.0,
+      "weight_before": 31864163.219540693,
+      "weight_after": 31864163.219540693,
+      "weight_removed": 0.0,
+      "weight_removed_pct": 0.0
+    },
+    {
+      "step": "Filter 3: Trips >= 3 hours",
+      "trips_before": 76667,
+      "trips_after": 76406,
+      "trips_removed": 261,
+      "trips_removed_pct": 0.34043330246390235,
+      "weight_before": 31864163.219540693,
+      "weight_after": 31771397.04352574,
+      "weight_removed": 92766.17601495236,
+      "weight_removed_pct": 0.29113011810730216
+    },
+    {
+      "step": "Filter 4: Excluded modes",
+      "trips_before": 76406,
+      "trips_after": 76149,
+      "trips_removed": 257,
+      "trips_removed_pct": 0.33636101876815955,
+      "weight_before": 31771397.04352574,
+      "weight_after": 31630815.56177172,
+      "weight_removed": 140581.48175401986,
+      "weight_removed_pct": 0.44247812446342216
+    }
+  ],
+  "experiment_name": "vae_lstm_2025-07-16_12-30-52"
+}

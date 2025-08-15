@@ -1,0 +1,103 @@
+{
+  "experiment_id": "vae_lstm_2025-07-16_12-30-52",
+  "model_type": "vae_lstm",
+  "model_class": "ConditionalTrajectoryVAE",
+  "created_at": "2025-07-16T12:30:52.857473",
+  "status": "completed",
+  "architecture": {
+    "_target_": "ml_mobility_ns3.models.vae_lstm.ConditionalTrajectoryVAE",
+    "name": "vae_lstm",
+    "input_dim": 3,
+    "hidden_dim": 128,
+    "latent_dim": 16,
+    "num_layers": 2,
+    "condition_dim": 32,
+    "dropout": 0.1
+  },
+  "training_config": {
+    "batch_size": 128,
+    "epochs": 1500,
+    "learning_rate": 0.001,
+    "val_split": 0.1,
+    "gradient_clip": 1.0,
+    "early_stopping_patience": 50,
+    "early_stopping_monitor": "val_loss",
+    "lr_scheduler_patience": 30,
+    "lr_scheduler_factor": 0.5,
+    "lr_scheduler_monitor": "val_loss",
+    "best_metric_monitor": "val_loss",
+    "loss": {
+      "type": "simple_vae",
+      "params": {
+        "beta": {
+          "type": "cyclical",
+          "params": {
+            "min_beta": 0.0,
+            "max_beta": 0.01,
+            "cycle_length": 20,
+            "mode": "cosine"
+          }
+        },
+        "free_bits": {
+          "enabled": true,
+          "lambda_free_bits": 2.0
+        }
+      }
+    }
+  },
+  "hydra_config": null,
+  "best_metrics": {
+    "epoch": 440,
+    "step": 222264,
+    "monitored_metric": "val_loss",
+    "best_monitor_value": 0.002752406522631645,
+    "val_loss": 0.002752406522631645,
+    "val_recon_loss": 0.002752406522631645,
+    "val_mse": 0.002752406522631645,
+    "val_speed_mae": 6.378464221954346,
+    "val_distance_mae": 1.8373724222183228,
+    "val_total_distance_mae": 5.3545756340026855,
+    "val_bird_distance_mae": 2.3672091960906982,
+    "val_kl_loss": 32.0,
+    "val_weighted_kl_loss": 0.0
+  },
+  "key_metrics": {
+    "best_val_loss": 0.002752406522631645,
+    "best_mse": 0.002752406522631645,
+    "best_speed_mae": 6.378464221954346,
+    "best_distance_mae": 1.8373724222183228,
+    "best_total_distance_mae": 5.3545756340026855,
+    "best_bird_distance_mae": 2.3672091960906982,
+    "best_epoch": 440,
+    "best_kl_loss": 32.0
+  },
+  "parameters": {
+    "total": 816899,
+    "trainable": 816899
+  },
+  "completed_at": "2025-07-17T04:36:15.657599",
+  "final_metrics": {
+    "best_val_loss": 0.002752406522631645,
+    "best_epoch": 440,
+    "best_metrics": {
+      "epoch": 440,
+      "step": 222264,
+      "monitored_metric": "val_loss",
+      "best_monitor_value": 0.002752406522631645,
+      "val_loss": 0.002752406522631645,
+      "val_recon_loss": 0.002752406522631645,
+      "val_mse": 0.002752406522631645,
+      "val_speed_mae": 6.378464221954346,
+      "val_distance_mae": 1.8373724222183228,
+      "val_total_distance_mae": 5.3545756340026855,
+      "val_bird_distance_mae": 2.3672091960906982,
+      "val_kl_loss": 32.0,
+      "val_weighted_kl_loss": 0.0
+    },
+    "epochs_trained": 492
+  },
+  "checkpoint_files": {
+    "best": "checkpoints/best_model.ckpt",
+    "last": "checkpoints/last.ckpt"
+  }
+}

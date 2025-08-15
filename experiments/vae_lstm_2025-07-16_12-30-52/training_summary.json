@@ -1,0 +1,30 @@
+{
+  "experiment_id": "vae_lstm_2025-07-16_12-30-52",
+  "model_type": "vae_lstm",
+  "status": "completed",
+  "final_metrics": {
+    "best_val_loss": 0.002752406522631645,
+    "best_epoch": 440,
+    "best_metrics": {
+      "epoch": 440,
+      "step": 222264,
+      "monitored_metric": "val_loss",
+      "best_monitor_value": 0.002752406522631645,
+      "val_loss": 0.002752406522631645,
+      "val_recon_loss": 0.002752406522631645,
+      "val_mse": 0.002752406522631645,
+      "val_speed_mae": 6.378464221954346,
+      "val_distance_mae": 1.8373724222183228,
+      "val_total_distance_mae": 5.3545756340026855,
+      "val_bird_distance_mae": 2.3672091960906982,
+      "val_kl_loss": 32.0,
+      "val_weighted_kl_loss": 0.0
+    },
+    "epochs_trained": 492
+  },
+  "training_time": "2025-07-17T04:36:15.658460",
+  "checkpoints": {
+    "best": "experiments/vae_lstm_2025-07-16_12-30-52/checkpoints/best_model.ckpt",
+    "last": "experiments/vae_lstm_2025-07-16_12-30-52/checkpoints/last.ckpt"
+  }
+}
