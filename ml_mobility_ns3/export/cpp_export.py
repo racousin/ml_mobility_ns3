@@ -231,7 +231,8 @@ class CppExporter:
         ns3_templates = [
             'netmob25-mobility-model.h.jinja',
             'netmob25-mobility-model.cc.jinja', 
-            'netmob25-mobility-example.cc.jinja'
+            'netmob25-mobility-example.cc.jinja',
+            'CMakeLists.txt.jinja'
         ]
         
         for template_name in ns3_templates:

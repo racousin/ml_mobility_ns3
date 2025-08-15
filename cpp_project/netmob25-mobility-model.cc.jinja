@@ -81,7 +81,7 @@ Netmob25MobilityModel::Netmob25MobilityModel ()
 Netmob25MobilityModel::~Netmob25MobilityModel ()
 {
   NS_LOG_FUNCTION (this);
-  if (m_updateEvent.IsRunning ())
+  if (m_updateEvent.IsPending ())
     {
       m_updateEvent.Cancel ();
     }

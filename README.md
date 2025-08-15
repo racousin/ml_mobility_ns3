@@ -67,18 +67,24 @@ python scripts/train.py model.hidden_dim=128 training.learning_rate=1e-3
 
 1. **Install NS-3:**
 ```bash
-wget https://www.nsnam.org/releases/ns-allinone-3.45.tar.bz2
-tar -jxvf ns-allinone-3.45.tar.bz2
-cd ns-allinone-3.45/ns-3.45
+wget https://www.nsnam.org/releases/ns-3.45.tar.bz2
+tar -jxvf ns-3.45.tar.bz2
+cd ns-3.45
 ./ns3 configure --enable-examples --enable-tests
 ./ns3 build
 ```
 
-2. **Download and Install PyTorch:**
+2. **Download and Install LibTorch in NS-3 directory:**
 ```bash
-# Download PyTorch C++ (LibTorch) - CPU version
-wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcpu.zip
-unzip libtorch-cxx11-abi-shared-with-deps-2.1.0+cpu.zip
+cd ns-3.45
+# Download libTorch C++ (LibTorch) - CPU version (https://pytorch.org/get-started/locally/)
+# For linux : 
+wget https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip
+unzip libtorch-shared-with-deps-2.8.0%2Bcpu.zip
+# For mac :
+wget https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.8.0.zip
+unzip libtorch-macos-arm64-2.8.0.zip
+
 export TORCH_ROOT=$(pwd)/libtorch
 export CMAKE_PREFIX_PATH=$TORCH_ROOT:$CMAKE_PREFIX_PATH
 ```
@@ -91,26 +97,30 @@ poetry run python scripts/export.py +experiment_id=vae_lstm_2025-07-16_12-30-52
 ```
 
 This creates `cpp_ns3_export/vae_lstm_2025-07-16_12-30-52/` containing:
-- `netmob25-mobility-model.h` - NS-3 mobility model header
-- `netmob25-mobility-model.cc` - NS-3 mobility model implementation  
+- `netmob25-mobility-model.h` - NS-3 mobility model header with integrated LibTorch support
+- `netmob25-mobility-model.cc` - NS-3 mobility model implementation with ML generation
 - `netmob25-mobility-example.cc` - Complete simulation example
-- `model.p` - ML model file for PyTorch inference
-- `metadata.json` - Model metadata including input/output dimensions
+- `CMakeLists.txt` - CMake configuration for NS-3 mobility module with LibTorch support
+- `model.pt` - TorchScript model for inference
+- `metadata.json` - Model metadata
+- `scalers.json` - Coordinate transformation parameters
 
 ```bash
 # 2. Copy files to NS-3
 cd cpp_ns3_export/vae_lstm_2025-07-16_12-30-52
 cp netmob25-mobility-model.* ../../ns-3.45/src/mobility/model/
 cp netmob25-mobility-example.cc ../../ns-3.45/scratch/
-cp model.p ../../ns-3.45/
+cp model.pt ../../ns-3.45/
+cp CMakeLists.txt ../../ns-3.45/src/mobility/
 
-# 3. Build NS-3 with PyTorch support
+# 3. Build NS-3 with LibTorch support
 cd ns-3.45
+export TORCH_ROOT=$(pwd)/libtorch
 CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 configure --enable-examples
 CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 build
 
 # 4. Run the example with ML trajectory generation
-./ns3 run "scratch/netmob25-mobility-example --nNodes=4 --simTime=30"
+./ns3 run "scratch/netmob25-mobility-example --nNodes=1 --simTime=10"
 ```
 
 ### Expected Output
