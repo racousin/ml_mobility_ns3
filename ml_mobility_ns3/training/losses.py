@@ -164,12 +164,18 @@ class AdaptiveSlowAnnealingBeta(BetaScheduler):
             self.current_beta = min(self.target_beta, 
                                   self.current_beta + self.beta_increment)
             
-            # Reset tracking
+            # Reset tracking - use current loss as new baseline
             self.steps_without_improvement = 0
-            self.best_loss = float('inf')  # Reset best loss for new beta level
+            # Use the current loss as the new baseline (not infinity!)
+            if self.loss_history:
+                # Use average of recent losses as new baseline
+                recent_losses = self.loss_history[-min(10, len(self.loss_history)):]
+                self.best_loss = sum(recent_losses) / len(recent_losses)
+            else:
+                self.best_loss = loss
             self.last_beta_increase_step = self.total_steps
             
-            logger.info(f"Beta increased to {self.current_beta:.4f} at step {self.total_steps}")
+            logger.info(f"Beta increased to {self.current_beta:.4f} at step {self.total_steps}, new baseline loss: {self.best_loss:.6f}")
             
     def get_beta(self, step: int, epoch: int) -> float:
         """Get current beta value."""
