@@ -1,7 +1,6 @@
 # @package _global_
 # Example configuration for VAE-LSTM starting from pretrained weights
-# Usage: python scripts/train.py +experiment=vae_lstm_from_pretrained devices=[6] accelerator=gpu
-
+# Usage: python scripts/train.py +experiment=vae_lstm_from_pretrained training=adaptive_training devices=[6] accelerator=gpu
 defaults:
   - _self_
 
@@ -26,13 +25,8 @@ training:
   gradient_clip: 1.0
   
   # Early stopping and LR scheduling
-  early_stopping_enabled: true
-  early_stopping_patience: 20
-  early_stopping_monitor: val_loss
-  lr_scheduler_enabled: true
-  lr_scheduler_patience: 10
-  lr_scheduler_factor: 0.5
-  lr_scheduler_monitor: val_loss
+  early_stopping_enabled: false
+  lr_scheduler_enabled: false
   best_metric_monitor: val_loss
   
   # Complete loss configuration with adaptive slow annealing

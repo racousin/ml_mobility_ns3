@@ -3,11 +3,8 @@ epochs: 2000
 learning_rate: 0.0001
 val_split: 0.1
 gradient_clip: 1.0
-early_stopping_patience: 20
-early_stopping_monitor: val_loss
-lr_scheduler_patience: 10
-lr_scheduler_factor: 0.5
-lr_scheduler_monitor: val_loss
+early_stopping_enabled: false
+lr_scheduler_enabled: false
 best_metric_monitor: val_loss
 # Optional: path to pretrained checkpoint to initialize weights
 pretrained_checkpoint: null
