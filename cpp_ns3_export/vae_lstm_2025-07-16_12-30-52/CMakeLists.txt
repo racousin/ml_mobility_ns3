@@ -87,7 +87,8 @@ build_lib(
 # Additional LibTorch configuration if found
 if(Torch_FOUND)
     # Use SYSTEM to suppress warnings from LibTorch headers
-    target_include_directories(${libmobility} SYSTEM PUBLIC ${TORCH_INCLUDE_DIRS})
+    # Use PRIVATE instead of PUBLIC to avoid CMake policy issues with source-tree paths
+    target_include_directories(${libmobility} SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS})
     target_compile_definitions(${libmobility} PUBLIC HAVE_LIBTORCH)
     target_compile_features(${libmobility} PUBLIC cxx_std_17)
     
