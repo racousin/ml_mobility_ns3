@@ -59,8 +59,9 @@ class TrajectoryLightningModule(pl.LightningModule):
             logger.info(f"Loading pretrained weights from: {checkpoint_path}")
             
             try:
-                # Load the checkpoint
-                checkpoint = torch.load(checkpoint_path, map_location='cpu')
+                # Load the checkpoint with weights_only=False since we trust this checkpoint
+                # This is needed for PyTorch 2.6+ which defaults to weights_only=True
+                checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
                 
                 # Extract state dict (handle both direct state_dict and Lightning checkpoint format)
                 if 'state_dict' in checkpoint:
