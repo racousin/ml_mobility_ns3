@@ -24,6 +24,9 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Initialize model
         self._init_model()
         
+        # Load pretrained weights if specified
+        self._load_pretrained_weights()
+        
         # Initialize loss function
         self._init_loss()
         
@@ -48,6 +51,49 @@ class TrajectoryLightningModule(pl.LightningModule):
         except Exception as e:
             logger.error(f"Failed to instantiate model: {e}")
             raise
+    
+    def _load_pretrained_weights(self):
+        """Load pretrained weights from a previous experiment if specified."""
+        if hasattr(self.config.training, 'pretrained_checkpoint') and self.config.training.pretrained_checkpoint:
+            checkpoint_path = self.config.training.pretrained_checkpoint
+            logger.info(f"Loading pretrained weights from: {checkpoint_path}")
+            
+            try:
+                # Load the checkpoint
+                checkpoint = torch.load(checkpoint_path, map_location='cpu')
+                
+                # Extract state dict (handle both direct state_dict and Lightning checkpoint format)
+                if 'state_dict' in checkpoint:
+                    # Lightning checkpoint format
+                    state_dict = checkpoint['state_dict']
+                    # Remove 'model.' prefix if present (from Lightning module)
+                    state_dict = {k.replace('model.', ''): v for k, v in state_dict.items() if k.startswith('model.')}
+                else:
+                    # Direct state dict
+                    state_dict = checkpoint
+                
+                # Load the state dict
+                missing_keys, unexpected_keys = self.model.load_state_dict(state_dict, strict=False)
+                
+                if missing_keys:
+                    logger.warning(f"Missing keys when loading pretrained weights: {missing_keys}")
+                if unexpected_keys:
+                    logger.warning(f"Unexpected keys when loading pretrained weights: {unexpected_keys}")
+                
+                logger.info(f"Successfully loaded pretrained weights from {checkpoint_path}")
+                
+                # Log epoch info if available
+                if 'epoch' in checkpoint:
+                    logger.info(f"Checkpoint was from epoch: {checkpoint['epoch']}")
+                if 'global_step' in checkpoint:
+                    logger.info(f"Checkpoint was from global step: {checkpoint['global_step']}")
+                    
+            except FileNotFoundError:
+                logger.error(f"Checkpoint file not found: {checkpoint_path}")
+                raise
+            except Exception as e:
+                logger.error(f"Failed to load pretrained weights: {e}")
+                raise
     
     def _init_loss(self):
         """Initialize loss function from config."""
