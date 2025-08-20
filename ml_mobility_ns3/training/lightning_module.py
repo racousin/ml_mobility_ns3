@@ -59,16 +59,21 @@ class TrajectoryLightningModule(pl.LightningModule):
             logger.info(f"Loading pretrained weights from: {checkpoint_path}")
             
             try:
-                # Load the checkpoint with weights_only=False since we trust this checkpoint
-                # This is needed for PyTorch 2.6+ which defaults to weights_only=True
+                # Load only the model weights, not the full Lightning checkpoint
+                # This avoids loading training configurations we don't want
                 checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
                 
-                # Extract state dict (handle both direct state_dict and Lightning checkpoint format)
+                # Extract only the model state dict from Lightning checkpoint
                 if 'state_dict' in checkpoint:
-                    # Lightning checkpoint format
-                    state_dict = checkpoint['state_dict']
-                    # Remove 'model.' prefix if present (from Lightning module)
-                    state_dict = {k.replace('model.', ''): v for k, v in state_dict.items() if k.startswith('model.')}
+                    # Lightning checkpoint format - extract only model weights
+                    full_state_dict = checkpoint['state_dict']
+                    # Filter to get only model parameters (remove Lightning module overhead)
+                    state_dict = {}
+                    for key, value in full_state_dict.items():
+                        if key.startswith('model.'):
+                            # Remove 'model.' prefix to match the actual model structure
+                            new_key = key[6:]  # Remove 'model.' prefix
+                            state_dict[new_key] = value
                 else:
                     # Direct state dict
                     state_dict = checkpoint
