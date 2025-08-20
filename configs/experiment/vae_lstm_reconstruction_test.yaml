@@ -37,9 +37,9 @@ training:
         type: adaptive_slow_annealing
         params:
           target_beta: 0.1                # Only go to 0.1 for testing
-          beta_increment: 0.01            # Larger increments for testing (10 steps to 0.1)
-          patience_steps: 10              # Shorter patience for testing
-          improvement_threshold: 1e-5     # Less strict threshold for testing
+          beta_increment: 0.01            # Larger increments for testing (10 increases to 0.1)
+          patience_epochs: 10             # Wait 10 epochs for testing
+          improvement_threshold: 1e-3     # Less strict threshold for testing
       free_bits:
         enabled: true
         lambda_free_bits: 2.0

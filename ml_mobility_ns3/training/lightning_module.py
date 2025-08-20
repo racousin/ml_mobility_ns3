@@ -136,10 +136,6 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Compute loss
         loss, loss_components = self._compute_loss(outputs, batch)
         
-        # Update adaptive scheduler if applicable
-        if hasattr(self.loss_fn, 'update_adaptive_scheduler'):
-            self.loss_fn.update_adaptive_scheduler(loss.item())
-        
         # Compute metrics
         metrics = self._compute_metrics(outputs, batch)
         
@@ -147,9 +143,9 @@ class TrajectoryLightningModule(pl.LightningModule):
         self._log_metrics(loss, loss_components, metrics, prefix='train')
         
         # Log adaptive scheduler status if available
-        if 'steps_without_improvement' in loss_components:
-            self.log('train_steps_without_improvement', 
-                    loss_components['steps_without_improvement'], prog_bar=False)
+        if 'epochs_without_improvement' in loss_components:
+            self.log('train_epochs_without_improvement', 
+                    loss_components['epochs_without_improvement'], prog_bar=False)
         if 'scheduler_converged' in loss_components:
             self.log('train_scheduler_converged', 
                     float(loss_components['scheduler_converged']), prog_bar=False)
@@ -185,6 +181,20 @@ class TrajectoryLightningModule(pl.LightningModule):
         """Aggregate validation metrics at epoch end - enhanced for beta scheduling."""
         if not self._validation_outputs:
             return
+        
+        # Calculate average validation loss for adaptive scheduler
+        avg_val_loss = sum(out['loss'].item() for out in self._validation_outputs) / len(self._validation_outputs)
+        
+        # Update adaptive scheduler with epoch-level validation loss (reconstruction loss preferably)
+        if hasattr(self.loss_fn, 'update_adaptive_scheduler_epoch'):
+            # Get average reconstruction loss if available
+            if 'loss_components' in self._validation_outputs[0] and 'recon_loss' in self._validation_outputs[0]['loss_components']:
+                avg_recon_loss = sum(out['loss_components']['recon_loss'].item() for out in self._validation_outputs) / len(self._validation_outputs)
+                self.loss_fn.update_adaptive_scheduler_epoch(self.current_epoch, avg_recon_loss)
+                logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} recon loss: {avg_recon_loss:.6f}")
+            else:
+                self.loss_fn.update_adaptive_scheduler_epoch(self.current_epoch, avg_val_loss)
+                logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} total loss: {avg_val_loss:.6f}")
         
         # Define key metrics to aggregate - VAE metrics
         key_metrics = ['mse', 'speed_mae', 'distance_mae', 'total_distance_mae', 'bird_distance_mae']

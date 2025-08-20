@@ -1,5 +1,8 @@
 # @package _global_
 # Complete experiment configuration for VAE-LSTM with reconstruction-focused training
+#  python scripts/train.py model=vae_lstm training=reconstruction_focused devices=[4] accelerator=gpu training.epochs=50000
+# model.hidden_dim=384 model.latent_dim=48 training.learning_rate=0.0008 training.batch_size=256
+
 
 defaults:
   - data: netmob25
@@ -33,9 +36,9 @@ training:
         type: adaptive_slow_annealing
         params:
           target_beta: 1.0                # Final beta value to reach
-          beta_increment: 0.001           # Small increments (1000 steps from 0 to 1)
-          patience_steps: 100             # Wait 100 steps without improvement
-          improvement_threshold: 1e-6     # Minimum improvement threshold
+          beta_increment: 0.001           # Small increments (1000 increases from 0 to 1)
+          patience_epochs: 100            # Wait 100 epochs without improvement
+          improvement_threshold: 1e-4     # Minimum improvement threshold
       free_bits:
         enabled: true
         lambda_free_bits: 2.0
