@@ -5,7 +5,7 @@
 defaults:
   - data: netmob25
   - model: vae_lstm
-  - training: reconstruction_focused
+  - training: default
   - _self_
 
 # Model configuration (should match the pretrained model architecture)

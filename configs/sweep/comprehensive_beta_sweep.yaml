@@ -20,8 +20,7 @@ model:
   - vae_attention
 
 training:
-  - patient_training
-  - warmup_training
+  - default
 
 # Additional parameter grid
 hydra/sweeper:
