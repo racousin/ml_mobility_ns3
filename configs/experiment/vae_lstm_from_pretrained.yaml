@@ -3,9 +3,6 @@
 # Usage: python scripts/train.py +experiment=vae_lstm_from_pretrained devices=[6] accelerator=gpu
 
 defaults:
-  - /data: netmob25
-  - /model: vae_lstm
-  - /training: default
   - _self_
 
 # Model configuration (should match the pretrained model architecture)

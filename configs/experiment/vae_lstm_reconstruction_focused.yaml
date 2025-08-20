@@ -4,9 +4,6 @@
 
 
 defaults:
-  - /data: netmob25
-  - /model: vae_lstm
-  - /training: default
   - _self_
 
 # Override model parameters if needed (using same as your reference experiment)
