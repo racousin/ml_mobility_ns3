@@ -23,9 +23,6 @@ training:
   batch_size: 128
   learning_rate: 0.0008
   
-  # Load pretrained weights from previous experiment
-  pretrained_checkpoint: experiments/vae_lstm_2025-07-16_12-30-52/checkpoints/best_model.ckpt
-  
   # Disable early stopping and LR scheduling
   early_stopping_enabled: false
   lr_scheduler_enabled: false
