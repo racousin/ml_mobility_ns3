@@ -1,7 +1,6 @@
 # @package _global_
 # Complete experiment configuration for VAE-LSTM with reconstruction-focused training
-#  python scripts/train.py model=vae_lstm training=reconstruction_focused devices=[4] accelerator=gpu training.epochs=50000
-# model.hidden_dim=384 model.latent_dim=48 training.learning_rate=0.0008 training.batch_size=256
+#  python scripts/train.py model=vae_lstm training=reconstruction_focused devices=[4] accelerator=gpu
 
 
 defaults:
@@ -22,7 +21,7 @@ model:
 training:
   epochs: 50000  # Very long training
   batch_size: 128
-  learning_rate: 0.001
+  learning_rate: 0.0008
   
   # Disable early stopping and LR scheduling
   early_stopping_enabled: false
