@@ -136,11 +136,23 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Compute loss
         loss, loss_components = self._compute_loss(outputs, batch)
         
+        # Update adaptive scheduler if applicable
+        if hasattr(self.loss_fn, 'update_adaptive_scheduler'):
+            self.loss_fn.update_adaptive_scheduler(loss.item())
+        
         # Compute metrics
         metrics = self._compute_metrics(outputs, batch)
         
         # Log everything
         self._log_metrics(loss, loss_components, metrics, prefix='train')
+        
+        # Log adaptive scheduler status if available
+        if 'steps_without_improvement' in loss_components:
+            self.log('train_steps_without_improvement', 
+                    loss_components['steps_without_improvement'], prog_bar=False)
+        if 'scheduler_converged' in loss_components:
+            self.log('train_scheduler_converged', 
+                    float(loss_components['scheduler_converged']), prog_bar=False)
         
         return loss
     
@@ -237,19 +249,24 @@ class TrajectoryLightningModule(pl.LightningModule):
             weight_decay=self.config.training.get('weight_decay', 1e-5)
         )
         
-        # Create scheduler
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode='min',
-            patience=self.config.training.lr_scheduler_patience,
-            factor=self.config.training.lr_scheduler_factor,
-            min_lr=self.config.training.get('lr_min', 1e-6)
-        )
-        
-        return {
-            'optimizer': optimizer,
-            'lr_scheduler': {
-                'scheduler': scheduler,
-                'monitor': self.config.training.lr_scheduler_monitor
+        # Check if learning rate scheduling is enabled
+        if self.config.training.get('lr_scheduler_enabled', True):
+            # Create scheduler
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode='min',
+                patience=self.config.training.lr_scheduler_patience,
+                factor=self.config.training.lr_scheduler_factor,
+                min_lr=self.config.training.get('lr_min', 1e-6)
+            )
+            
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': {
+                    'scheduler': scheduler,
+                    'monitor': self.config.training.lr_scheduler_monitor
+                }
             }
-        }
+        else:
+            # No scheduler
+            return optimizer

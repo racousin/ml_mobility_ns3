@@ -1,0 +1,47 @@
+# @package _global_
+# Complete experiment configuration for VAE-LSTM with reconstruction-focused training
+
+defaults:
+  - data: netmob25
+  - model: vae_lstm
+  - training: reconstruction_focused
+  - _self_
+
+# Override model parameters if needed (using same as your reference experiment)
+model:
+  hidden_dim: 128
+  latent_dim: 16
+  num_layers: 2
+  condition_dim: 32
+  dropout: 0.1
+
+# Training overrides for this specific experiment
+training:
+  epochs: 50000  # Very long training
+  batch_size: 128
+  learning_rate: 0.001
+  
+  # Disable early stopping and LR scheduling
+  early_stopping_enabled: false
+  lr_scheduler_enabled: false
+  
+  # Loss with adaptive beta annealing
+  loss:
+    type: simple_vae
+    params:
+      beta:
+        type: adaptive_slow_annealing
+        params:
+          target_beta: 1.0                # Final beta value to reach
+          beta_increment: 0.001           # Small increments (1000 steps from 0 to 1)
+          patience_steps: 100             # Wait 100 steps without improvement
+          improvement_threshold: 1e-6     # Minimum improvement threshold
+      free_bits:
+        enabled: true
+        lambda_free_bits: 2.0
+
+# Device configuration - adjust based on your system
+accelerator: gpu
+devices: [0]  # Use GPU 0, change as needed
+
+seed: 42

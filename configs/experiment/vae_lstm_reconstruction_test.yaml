@@ -1,0 +1,51 @@
+# @package _global_
+# Test configuration for reconstruction-focused training (shorter version for testing)
+
+defaults:
+  - data: netmob25
+  - model: vae_lstm
+  - _self_
+
+# Model parameters
+model:
+  hidden_dim: 128
+  latent_dim: 16
+  num_layers: 2
+  condition_dim: 32
+  dropout: 0.1
+
+# Shorter training for testing
+training:
+  epochs: 100  # Short test run
+  batch_size: 128
+  learning_rate: 0.001
+  val_split: 0.1
+  gradient_clip: 1.0
+  
+  # Disable early stopping and LR scheduling for testing
+  early_stopping_enabled: false
+  lr_scheduler_enabled: false
+  
+  # Monitoring
+  best_metric_monitor: val_loss
+  
+  # Loss with adaptive beta annealing for testing
+  loss:
+    type: simple_vae
+    params:
+      beta:
+        type: adaptive_slow_annealing
+        params:
+          target_beta: 0.1                # Only go to 0.1 for testing
+          beta_increment: 0.01            # Larger increments for testing (10 steps to 0.1)
+          patience_steps: 10              # Shorter patience for testing
+          improvement_threshold: 1e-5     # Less strict threshold for testing
+      free_bits:
+        enabled: true
+        lambda_free_bits: 2.0
+
+# Device configuration
+accelerator: auto
+devices: auto
+
+seed: 42

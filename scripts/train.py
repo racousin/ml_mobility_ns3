@@ -151,14 +151,18 @@ class TrainingPipeline:
         )
         callbacks.append(checkpoint_callback)
         
-        # Early stopping
-        early_stopping = EarlyStopping(
-            monitor=self.cfg.training.early_stopping_monitor,
-            patience=self.cfg.training.early_stopping_patience,
-            mode='min',
-            verbose=True
-        )
-        callbacks.append(early_stopping)
+        # Early stopping (optional - check if enabled)
+        if self.cfg.training.get('early_stopping_enabled', True):
+            early_stopping = EarlyStopping(
+                monitor=self.cfg.training.early_stopping_monitor,
+                patience=self.cfg.training.early_stopping_patience,
+                mode='min',
+                verbose=True
+            )
+            callbacks.append(early_stopping)
+            logger.info("Early stopping enabled")
+        else:
+            logger.info("Early stopping disabled")
         
         # Best metrics tracker
         metrics_tracker = BestMetricsTracker(

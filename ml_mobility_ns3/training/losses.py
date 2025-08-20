@@ -107,6 +107,85 @@ class CyclicalBeta(BetaScheduler):
         return beta
 
 
+class AdaptiveSlowAnnealingBeta(BetaScheduler):
+    """
+    Adaptive slow annealing beta scheduler that:
+    1. Starts with pure reconstruction (beta=0)
+    2. Increases beta only when loss has converged (no improvement for patience steps)
+    3. Uses very small increments to gradually reach target beta
+    """
+    
+    def __init__(self, 
+                 target_beta: float = 1.0,
+                 beta_increment: float = 0.001,
+                 patience_steps: int = 100,
+                 improvement_threshold: float = 1e-6):
+        """
+        Args:
+            target_beta: Final beta value to reach (default 1.0)
+            beta_increment: How much to increase beta each time (very small, e.g., 0.001)
+            patience_steps: Number of steps without improvement before increasing beta
+            improvement_threshold: Minimum loss improvement to reset patience counter
+        """
+        self.target_beta = target_beta
+        self.beta_increment = beta_increment
+        self.patience_steps = patience_steps
+        self.improvement_threshold = improvement_threshold
+        
+        # Internal state
+        self.current_beta = 0.0
+        self.loss_history = []
+        self.best_loss = float('inf')
+        self.steps_without_improvement = 0
+        self.last_beta_increase_step = 0
+        self.total_steps = 0
+        
+    def update_loss(self, loss: float):
+        """Update loss history and check for convergence."""
+        self.total_steps += 1
+        self.loss_history.append(loss)
+        
+        # Keep only recent history
+        if len(self.loss_history) > self.patience_steps * 2:
+            self.loss_history.pop(0)
+        
+        # Check if loss improved
+        if loss < self.best_loss - self.improvement_threshold:
+            self.best_loss = loss
+            self.steps_without_improvement = 0
+        else:
+            self.steps_without_improvement += 1
+        
+        # Check if we should increase beta
+        if (self.steps_without_improvement >= self.patience_steps and 
+            self.current_beta < self.target_beta):
+            
+            # Increase beta
+            self.current_beta = min(self.target_beta, 
+                                  self.current_beta + self.beta_increment)
+            
+            # Reset tracking
+            self.steps_without_improvement = 0
+            self.best_loss = float('inf')  # Reset best loss for new beta level
+            self.last_beta_increase_step = self.total_steps
+            
+            logger.info(f"Beta increased to {self.current_beta:.4f} at step {self.total_steps}")
+            
+    def get_beta(self, step: int, epoch: int) -> float:
+        """Get current beta value."""
+        return self.current_beta
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current scheduler status for logging."""
+        return {
+            'current_beta': self.current_beta,
+            'steps_without_improvement': self.steps_without_improvement,
+            'best_loss': self.best_loss,
+            'total_steps': self.total_steps,
+            'converged': self.current_beta >= self.target_beta
+        }
+
+
 def create_beta_scheduler(config: Dict[str, Any]) -> BetaScheduler:
     """Create beta scheduler from config."""
     scheduler_type = config.get('type', 'constant')
@@ -120,6 +199,8 @@ def create_beta_scheduler(config: Dict[str, Any]) -> BetaScheduler:
         return ExponentialAnnealingBeta(**params)
     elif scheduler_type == 'cyclical':
         return CyclicalBeta(**params)
+    elif scheduler_type == 'adaptive_slow_annealing':
+        return AdaptiveSlowAnnealingBeta(**params)
     else:
         raise ValueError(f"Unknown beta scheduler type: {scheduler_type}")
 
@@ -189,6 +270,20 @@ class SimpleVAELoss(BaseLoss):
         self.free_bits = None
         if free_bits is not None and free_bits.get('enabled', False):
             self.free_bits = FreeBits(free_bits.get('lambda_free_bits', 2.0))
+        
+        # Track if we're using adaptive scheduler
+        self.is_adaptive = isinstance(self.beta_scheduler, AdaptiveSlowAnnealingBeta)
+    
+    def update_adaptive_scheduler(self, loss: float):
+        """Update adaptive scheduler with current loss if applicable."""
+        if self.is_adaptive:
+            self.beta_scheduler.update_loss(loss)
+    
+    def get_scheduler_status(self) -> Optional[Dict[str, Any]]:
+        """Get scheduler status if adaptive."""
+        if self.is_adaptive:
+            return self.beta_scheduler.get_status()
+        return None
     
     def __call__(self, outputs: Dict[str, torch.Tensor], 
                  targets: Dict[str, torch.Tensor], 
@@ -223,13 +318,21 @@ class SimpleVAELoss(BaseLoss):
         # Total loss
         total = recon_loss + beta * kl_loss
         
-        return {
+        result = {
             'total': total,
             'recon_loss': recon_loss,
             'kl_loss': kl_loss,
             'weighted_kl_loss': beta * kl_loss,
             'beta': beta  # Include current beta value for logging
         }
+        
+        # Add scheduler status if adaptive
+        if self.is_adaptive:
+            status = self.beta_scheduler.get_status()
+            result['steps_without_improvement'] = status['steps_without_improvement']
+            result['scheduler_converged'] = status['converged']
+        
+        return result
 
 
 
