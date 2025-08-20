@@ -1,0 +1,27 @@
+batch_size: 128
+epochs: 2000
+learning_rate: 0.0001
+val_split: 0.1
+gradient_clip: 1.0
+early_stopping_patience: 20
+early_stopping_monitor: val_loss
+lr_scheduler_patience: 10
+lr_scheduler_factor: 0.5
+lr_scheduler_monitor: val_loss
+best_metric_monitor: val_loss
+# Optional: path to pretrained checkpoint to initialize weights
+pretrained_checkpoint: null
+# Loss configuration with adaptive slow annealing
+loss:
+  type: simple_vae
+  params:
+    beta:
+      type: adaptive_slow_annealing
+      params:
+        target_beta: 1.0
+        beta_increment: 0.001
+        patience_epochs: 50
+        improvement_threshold: 1e-4
+    free_bits:
+      enabled: true
+      lambda_free_bits: 2.0
