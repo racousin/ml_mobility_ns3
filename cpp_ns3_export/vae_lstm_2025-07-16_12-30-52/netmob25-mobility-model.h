@@ -26,11 +26,7 @@
 #include "ns3/geographic-positions.h"
 #include <vector>
 #include <cmath>
-
-#ifdef HAVE_LIBTORCH
-#include <torch/script.h>
-#include <map>
-#endif
+#include <memory>
 
 namespace ns3 {
 
@@ -131,10 +127,9 @@ private:
   bool m_initialized;
 
 #ifdef HAVE_LIBTORCH
-  // ML model
-  torch::jit::script::Module m_model;
-  torch::Device m_device = torch::kCPU;
-  bool m_modelLoaded = false;
+  // Private implementation to hide LibTorch dependencies
+  class Impl;
+  std::unique_ptr<Impl> m_pImpl;
 #endif
 };
 

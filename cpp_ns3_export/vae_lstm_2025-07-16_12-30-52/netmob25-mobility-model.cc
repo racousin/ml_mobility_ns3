@@ -11,7 +11,18 @@
 #include "ns3/string.h"
 
 #ifdef HAVE_LIBTORCH
+#include <torch/script.h>
 #include <iostream>
+
+// Implementation class definition - keeps LibTorch types private
+class Netmob25MobilityModel::Impl {
+public:
+  torch::jit::script::Module model;
+  torch::Device device = torch::kCPU;
+  bool modelLoaded = false;
+  
+  Impl() : device(torch::kCPU), modelLoaded(false) {}
+};
 #endif
 
 namespace ns3 {
@@ -81,6 +92,9 @@ Netmob25MobilityModel::Netmob25MobilityModel ()
     m_initialized (false)
 {
   NS_LOG_FUNCTION (this);
+#ifdef HAVE_LIBTORCH
+  m_pImpl = std::make_unique<Impl>();
+#endif
 }
 
 Netmob25MobilityModel::~Netmob25MobilityModel ()
@@ -244,7 +258,7 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
       NS_LOG_INFO ("Generating trajectory using ML model: " << m_modelPath);
       
       // Load model if not already loaded
-      if (!m_modelLoaded)
+      if (!m_pImpl->modelLoaded)
         {
           LoadModel ();
         }
@@ -304,11 +318,11 @@ Netmob25MobilityModel::LoadModel (void)
   try
     {
       // Load the TorchScript model
-      m_model = torch::jit::load (m_modelPath);
-      m_model.to (m_device);
-      m_model.eval ();
+      m_pImpl->model = torch::jit::load (m_modelPath);
+      m_pImpl->model.to (m_pImpl->device);
+      m_pImpl->model.eval ();
       
-      m_modelLoaded = true;
+      m_pImpl->modelLoaded = true;
       NS_LOG_INFO ("Model loaded successfully from: " << m_modelPath);
     }
   catch (const c10::Error& e)
@@ -339,7 +353,7 @@ Netmob25MobilityModel::GenerateFromModel (int trip_length)
       // The model expects (batch_size, sequence_length, input_dim)
       int sequence_length = 2000;  // Max sequence length the model supports
       int input_dim = 3;  // lat, lon, speed
-      torch::Tensor x = torch::randn ({1, sequence_length, input_dim}, m_device);
+      torch::Tensor x = torch::randn ({1, sequence_length, input_dim}, m_pImpl->device);
       
       // Map transport mode string to index
       int mode_idx = 0;  // Default to WALKING
@@ -353,10 +367,10 @@ Netmob25MobilityModel::GenerateFromModel (int trip_length)
         }
       
       // Create transport mode tensor
-      torch::Tensor transport_mode = torch::tensor ({mode_idx}, torch::kLong).to (m_device);
+      torch::Tensor transport_mode = torch::tensor ({mode_idx}, torch::kLong).to (m_pImpl->device);
       
       // Create length tensor
-      torch::Tensor length = torch::tensor ({trip_length}, torch::kLong).to (m_device);
+      torch::Tensor length = torch::tensor ({trip_length}, torch::kLong).to (m_pImpl->device);
       
       // Forward pass through the model
       std::vector<torch::jit::IValue> inputs;
@@ -365,7 +379,7 @@ Netmob25MobilityModel::GenerateFromModel (int trip_length)
       inputs.push_back (length);
       
       // Get output
-      auto output = m_model.forward (inputs);
+      auto output = m_pImpl->model.forward (inputs);
       torch::Tensor traj_tensor;
       
       // Handle different output types
