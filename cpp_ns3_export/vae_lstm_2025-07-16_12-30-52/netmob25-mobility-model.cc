@@ -13,7 +13,11 @@
 #ifdef HAVE_LIBTORCH
 #include <torch/script.h>
 #include <iostream>
+#endif
 
+namespace ns3 {
+
+#ifdef HAVE_LIBTORCH
 // Implementation class definition - keeps LibTorch types private
 class Netmob25MobilityModel::Impl {
 public:
@@ -24,8 +28,6 @@ public:
   Impl() : device(torch::kCPU), modelLoaded(false) {}
 };
 #endif
-
-namespace ns3 {
 
 NS_LOG_COMPONENT_DEFINE ("Netmob25MobilityModel");
 
@@ -337,7 +339,7 @@ Netmob25MobilityModel::GenerateFromModel (int trip_length)
 {
   NS_LOG_FUNCTION (this << trip_length);
   
-  if (!m_modelLoaded)
+  if (!m_pImpl->modelLoaded)
     {
       throw std::runtime_error ("Model not loaded!");
     }
