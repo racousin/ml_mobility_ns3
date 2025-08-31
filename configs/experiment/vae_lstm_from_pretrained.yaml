@@ -19,7 +19,7 @@ training:
   
   # Basic training parameters
   batch_size: 128
-  epochs: 2000
+  epochs: 20000
   learning_rate: 0.0001
   val_split: 0.1
   gradient_clip: 1.0

@@ -16,9 +16,7 @@ mkdir -p logs
 # module load python/3.11
 # module load cuda/11.8
 
-# Activate your environment - choose one:
-
-# Option 2: Virtual environment
+# Install minimal requirements and activate environment
 source venv/bin/activate
 
 

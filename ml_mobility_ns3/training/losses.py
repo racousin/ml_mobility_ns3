@@ -119,13 +119,15 @@ class AdaptiveSlowAnnealingBeta(BetaScheduler):
                  target_beta: float = 1.0,
                  beta_increment: float = 0.001,
                  patience_epochs: int = 100,
-                 improvement_threshold: float = 1e-4):
+                 improvement_threshold: float = 1e-4,
+                 initial_beta: float = 0.0):
         """
         Args:
             target_beta: Final beta value to reach (default 1.0)
             beta_increment: How much to increase beta each time (very small, e.g., 0.001)
             patience_epochs: Number of epochs without improvement before increasing beta
             improvement_threshold: Minimum loss improvement to reset patience counter
+            initial_beta: Initial beta value to start with (default 0.0)
         """
         self.target_beta = target_beta
         self.beta_increment = beta_increment
@@ -133,7 +135,7 @@ class AdaptiveSlowAnnealingBeta(BetaScheduler):
         self.improvement_threshold = improvement_threshold
         
         # Internal state
-        self.current_beta = 0.0
+        self.current_beta = initial_beta
         self.epoch_losses = []
         self.best_epoch_loss = float('inf')
         self.epochs_without_improvement = 0
