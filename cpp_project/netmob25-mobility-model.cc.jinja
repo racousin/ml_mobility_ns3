@@ -9,6 +9,7 @@
 #include "ns3/double.h"
 #include "ns3/uinteger.h"
 #include "ns3/string.h"
+#include "geographic-positions.h"
 
 #ifdef HAVE_LIBTORCH
 #include <torch/script.h>
@@ -273,9 +274,14 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
           m_trajectory.clear ();
           
           // Convert generated points to NS-3 coordinates
-          // Set reference point (center of Île-de-France region)
-          double refLat = 48.725;
-          double refLon = 2.5;
+          // Reference point (Paris coordinates as specified)
+          double refLat = 48.852737;
+          double refLon = 2.350699;
+          double refAlt = 0.0;
+          
+          // COMMENTED OUT: Convert reference point to Cartesian coordinates
+          Vector refCartesian = GeographicPositions::GeographicToCartesianCoordinates (
+            refLat, refLon, refAlt, GeographicPositions::WGS84);
           
           for (const auto& point : points)
             {
@@ -283,15 +289,22 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
               // Original data: lat ~ N(48.725, 0.515), lon ~ N(2.5, 1.05)
               double lat = point[0] * 0.515 + 48.725;  // unscale latitude
               double lon = point[1] * 1.05 + 2.5;      // unscale longitude
+              double alt = 0.0;  // altitude
               
-              // Convert GPS coordinates to local meters using simple approximation
-              // At latitude 48.725°, 1 degree latitude ≈ 111.3 km
-              // 1 degree longitude ≈ 69.4 km
-              double x = (lon - refLon) * 69400.0;  // Convert longitude difference to meters
-              double y = (lat - refLat) * 111300.0; // Convert latitude difference to meters
+              // COMMENTED OUT: Convert from geographic to Cartesian coordinates
+              Vector cartesianPos = GeographicPositions::GeographicToCartesianCoordinates (
+                lat, lon, alt, GeographicPositions::WGS84);
               
-              // Add to trajectory (no additional scaling needed)
-              m_trajectory.push_back (Vector (x, y, 0.0));
+              // Apply reference point offset to get relative coordinates
+              Vector relativePos = Vector (
+                cartesianPos.x - refCartesian.x,
+                cartesianPos.y - refCartesian.y,
+                cartesianPos.z - refCartesian.z
+              );
+              
+              // Directly use lat/lon for now to check model output
+              // Add to trajectory
+              m_trajectory.push_back (relativePos);
             }
           
           m_totalSteps = m_trajectory.size ();

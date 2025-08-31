@@ -18,7 +18,7 @@ experiments/
 logs/
 all_real_trajectories.html
 cpp_ns3_export/
-
+all_generated_trajectories2.html
 
 # Distribution / packaging
 .Python
