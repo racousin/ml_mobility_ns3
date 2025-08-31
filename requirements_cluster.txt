@@ -1,0 +1,13 @@
+# Essential packages for training on cluster with Python < 3.11
+torch==2.1.0
+pytorch-lightning==2.1.0
+hydra-core==1.3.2
+omegaconf==2.3.0
+numpy==1.24.0
+pandas==2.0.0
+scikit-learn==1.3.0
+matplotlib==3.7.0
+seaborn==0.12.0
+tqdm==4.65.0
+PyYAML==6.0
+tensorboard==2.13.0
