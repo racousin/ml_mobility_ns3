@@ -27,6 +27,6 @@ echo "Node: $SLURM_NODELIST"
 echo "GPU: $CUDA_VISIBLE_DEVICES"
 
 # Run the training
-python scripts/train.py +experiment=vae_lstm_from_pretrained accelerator=gpu devices=[0]
+python scripts/train.py +experiment=vae_lstm_from_pretrained training=adaptive_training accelerator=gpu devices=[0]
 
 echo "Training completed!"
