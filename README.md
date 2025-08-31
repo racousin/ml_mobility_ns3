@@ -30,7 +30,7 @@ poetry run python scripts/list_experiments.py
 ### Evaluation
 
 ```bash
-poetry run python scripts/evaluate.py +experiment_id=vae_dense_2025-07-14_16-14-23
+poetry run python scripts/evaluate.py +experiment_id=optimal_medium_v2
 ```
 
 ### Generated Trajectories Example
@@ -92,10 +92,10 @@ export CMAKE_PREFIX_PATH=$TORCH_ROOT:$CMAKE_PREFIX_PATH
 
 ```bash
 # 1. Export your trained model
-poetry run python scripts/export.py +experiment_id=vae_lstm_2025-08-26_10-32-38
+poetry run python scripts/export.py +experiment_id=optimal_medium_v2
 ```
 
-This creates `cpp_ns3_export/vae_lstm_2025-08-26_10-32-38/` containing:
+This creates `cpp_ns3_export/optimal_medium_v2/` containing:
 - `netmob25-mobility-model.h` - NS-3 mobility model header with integrated LibTorch support
 - `netmob25-mobility-model.cc` - NS-3 mobility model implementation with ML generation
 - `netmob25-mobility-example.cc` - Complete simulation example
@@ -106,7 +106,7 @@ This creates `cpp_ns3_export/vae_lstm_2025-08-26_10-32-38/` containing:
 
 ```bash
 # 2. Copy files to NS-3
-cd cpp_ns3_export/vae_lstm_2025-08-26_10-32-38
+cd cpp_ns3_export/optimal_medium_v2
 cp netmob25-mobility-model.* ../../ns-3.45/src/mobility/model/
 cp netmob25-mobility-example.cc ../../ns-3.45/scratch/
 cp model.pt ../../ns-3.45/

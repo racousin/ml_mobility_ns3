@@ -1,0 +1,28 @@
+{
+  "experiment_name": "optimal_medium_v2",
+  "model_type": "ConditionalTrajectoryVAE",
+  "model_config": {
+    "input_dim": 3,
+    "sequence_length": 2000,
+    "hidden_dim": 256,
+    "latent_dim": 28,
+    "num_layers": 2,
+    "num_transport_modes": 5,
+    "condition_dim": 32,
+    "dropout": 0.1
+  },
+  "transport_modes": [
+    "BIKE",
+    "CAR",
+    "MIXED",
+    "PUBLIC_TRANSPORT",
+    "WALKING"
+  ],
+  "n_transport_modes": 5,
+  "sequence_length": 2000,
+  "input_dim": 3,
+  "latent_dim": 28,
+  "hidden_dim": 256,
+  "scaling_method": "StandardScaler",
+  "note": "Legacy model exported from optimal_medium_v2 with individual transport modes"
+}
