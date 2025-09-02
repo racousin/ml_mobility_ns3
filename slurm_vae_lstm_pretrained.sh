@@ -9,9 +9,6 @@
 #SBATCH --nodelist=kavinsky
 #SBATCH --gres=gpu:1
 
-# Create logs directory if it doesn't exist
-mkdir -p logs
-
 # Load modules (adjust based on your cluster)
 # module load python/3.11
 # module load cuda/11.8

@@ -15,7 +15,7 @@ model:
 # Training configuration - complete config to avoid parameter conflicts
 training:
   # Path to pretrained checkpoint
-  pretrained_checkpoint: experiments/vae_lstm_2025-08-26_10-32-38/checkpoints/last.ckpt
+  pretrained_checkpoint: experiments/vae_lstm_2025-08-31_22-51-58/checkpoints/last.ckpt
   
   # Basic training parameters
   batch_size: 128
@@ -38,7 +38,7 @@ training:
         params:
           initial_beta: 0.03
           target_beta: 1.0
-          beta_increment: 0.001
+          beta_increment: 0.01
           patience_epochs: 50
           improvement_threshold: 1e-4
       free_bits:
