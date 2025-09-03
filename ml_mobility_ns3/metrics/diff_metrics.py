@@ -183,10 +183,22 @@ class DiffMetrics:
         pred_original = self._inverse_transform_trajectories(pred)
         target_original = self._inverse_transform_trajectories(target)
         
-        # FIXED: Speed MAE (ensuring it's MAE, not MSE)
+        # Speed MAE from 3rd feature (informative speed in km/h)
         speed_pred = pred_original[:, :, 2]
         speed_target = target_original[:, :, 2]
         speed_mae = (torch.abs(speed_pred - speed_target) * mask).sum() / (mask.sum() + 1e-8)
+        
+        # Consecutive distance MAE (actual distance between consecutive points)
+        pred_consecutive_dist = torch.sqrt(
+            (pred_original[:, 1:, 0] - pred_original[:, :-1, 0])**2 + 
+            (pred_original[:, 1:, 1] - pred_original[:, :-1, 1])**2 + 1e-8
+        ) * 111.0  # Convert to km
+        target_consecutive_dist = torch.sqrt(
+            (target_original[:, 1:, 0] - target_original[:, :-1, 0])**2 + 
+            (target_original[:, 1:, 1] - target_original[:, :-1, 1])**2 + 1e-8
+        ) * 111.0
+        consecutive_mask = mask[:, 1:] * mask[:, :-1]
+        consecutive_distance_mae = (torch.abs(pred_consecutive_dist - target_consecutive_dist) * consecutive_mask).sum() / (consecutive_mask.sum() + 1e-8)
         
         # Distance MAE (point-to-point)
         lat_pred = pred_original[:, :, 0]
@@ -210,7 +222,8 @@ class DiffMetrics:
         
         return {
             'mse': mse,
-            'speed_mae': speed_mae,          # Mean Absolute Error for speed (km/h)
+            'speed_mae': speed_mae,          # Mean Absolute Error for speed from 3rd feature (km/h)
+            'consecutive_distance_mae': consecutive_distance_mae,  # Consecutive point distance MAE (km)
             'distance_mae': distance_mae,    # Point-to-point distance MAE (km)
             'total_distance_mae': total_distance_mae,  # Total trajectory distance MAE (km)
             'bird_distance_mae': bird_distance_mae,    # Straight-line distance MAE (km)
