@@ -280,7 +280,7 @@ def main():
     # Set paths
     experiment_path = Path("experiments/vae_lstm_2025-09-02_09-27-49")
     preprocessing_dir = Path("data/processed")
-    output_file = "all_generated_trajectories2.html"
+    output_file = "all_generated_trajectories3.html"
     
     # Setup device
     device = get_device()
