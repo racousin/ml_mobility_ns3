@@ -248,7 +248,29 @@ class TrajectoryLightningModule(pl.LightningModule):
                     avg_recon_loss = sum(out['loss_components']['recon_loss'].item() for out in self._validation_outputs) / len(self._validation_outputs)
                     avg_kl_loss = sum(out['loss_components']['kl_loss'].item() for out in self._validation_outputs) / len(self._validation_outputs)
                     complete_loss = avg_recon_loss + avg_kl_loss
-                    logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} weighted val_loss: {avg_val_loss:.6f} (recon: {avg_recon_loss:.6f}, kl: {avg_kl_loss:.6f}, complete: {complete_loss:.6f})")
+                    
+                    # Get detailed reconstruction breakdown if available
+                    recon_breakdown = []
+                    if 'recon_weighted_coord' in self._validation_outputs[0]['loss_components']:
+                        avg_coord = sum(out['loss_components']['recon_weighted_coord'].item() for out in self._validation_outputs) / len(self._validation_outputs)
+                        recon_breakdown.append(f"coord:{avg_coord:.3f}")
+                    if 'recon_weighted_point' in self._validation_outputs[0]['loss_components']:
+                        avg_point = sum(out['loss_components']['recon_weighted_point'].item() for out in self._validation_outputs) / len(self._validation_outputs)
+                        recon_breakdown.append(f"point:{avg_point:.3f}")
+                    if 'recon_weighted_consecutive' in self._validation_outputs[0]['loss_components']:
+                        avg_consec = sum(out['loss_components']['recon_weighted_consecutive'].item() for out in self._validation_outputs) / len(self._validation_outputs)
+                        recon_breakdown.append(f"consec:{avg_consec:.3f}")
+                    if 'recon_weighted_cumulative' in self._validation_outputs[0]['loss_components']:
+                        avg_cumul = sum(out['loss_components']['recon_weighted_cumulative'].item() for out in self._validation_outputs) / len(self._validation_outputs)
+                        recon_breakdown.append(f"cumul:{avg_cumul:.3f}")
+                    
+                    if recon_breakdown:
+                        breakdown_str = " + ".join(recon_breakdown)
+                        logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} weighted val_loss: {avg_val_loss:.6f}")
+                        logger.info(f"  Reconstruction: {avg_recon_loss:.6f} = ({breakdown_str})")
+                        logger.info(f"  KL: {avg_kl_loss:.6f}, Complete: {complete_loss:.6f}")
+                    else:
+                        logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} weighted val_loss: {avg_val_loss:.6f} (recon: {avg_recon_loss:.6f}, kl: {avg_kl_loss:.6f}, complete: {complete_loss:.6f})")
                 else:
                     logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} val_loss: {avg_val_loss:.6f}")
         

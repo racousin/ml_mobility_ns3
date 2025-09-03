@@ -141,11 +141,18 @@ class DistanceAwareLoss(nn.Module):
         # - point_distance: target < 1 km (no normalization needed)
         # - consecutive_distance_diff: ~0.001-0.005 km (multiply by 500 to scale)
         # - trajectory_length_diff: target ~1 km (no normalization needed)
+        
+        # Store weighted components for logging
+        losses['weighted_coord'] = self.coordinate_weight * losses['coord_mse']
+        losses['weighted_point'] = self.point_distance_weight * losses['point_distance']
+        losses['weighted_consecutive'] = self.consecutive_distance_weight * losses['consecutive_distance_diff'] * 500.0
+        losses['weighted_cumulative'] = self.cumulative_distance_weight * losses['trajectory_length_diff']
+        
         total_loss = (
-            self.coordinate_weight * losses['coord_mse'] +
-            self.point_distance_weight * losses['point_distance'] +  # Target < 1 km
-            self.consecutive_distance_weight * losses['consecutive_distance_diff'] * 500.0 +  # Scale tiny differences  
-            self.cumulative_distance_weight * losses['trajectory_length_diff']  # Target ~1 km
+            losses['weighted_coord'] +
+            losses['weighted_point'] +
+            losses['weighted_consecutive'] +
+            losses['weighted_cumulative']
         )
         
         losses['total'] = total_loss
