@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-from typing import Dict, Optional
+from typing import Dict, Optional, Any, Union
+from ml_mobility_ns3.training.losses import BaseLoss, create_beta_scheduler, FreeBits
 
 
 class DistanceAwareLoss(nn.Module):
@@ -130,47 +131,86 @@ class DistanceAwareLoss(nn.Module):
         return valid_distances.sum(dim=1)
 
 
-class DistanceVAELoss(nn.Module):
+class DistanceVAELoss(BaseLoss):
     """
     VAE loss combining distance-aware reconstruction with KL divergence.
+    Inherits from BaseLoss to integrate with the training framework.
     """
     
     def __init__(
         self,
-        beta: float = 1.0,
+        beta: Optional[Union[float, Dict[str, Any]]] = None,
         distance_loss_config: Optional[Dict] = None,
+        free_bits: Optional[Dict[str, Any]] = None,
         **kwargs
     ):
         super().__init__()
-        self.beta = beta
+        
+        # Setup beta scheduler
+        if beta is None:
+            self.beta_scheduler = create_beta_scheduler({'type': 'constant', 'value': 1.0})
+        elif isinstance(beta, (int, float)):
+            self.beta_scheduler = create_beta_scheduler({'type': 'constant', 'value': float(beta)})
+        else:
+            self.beta_scheduler = create_beta_scheduler(beta)
+            
+        # Setup free bits if configured
+        self.free_bits = None
+        if free_bits and free_bits.get('enabled', False):
+            self.free_bits = FreeBits(free_bits.get('lambda_free_bits', 2.0))
+        
+        # Setup distance-aware reconstruction loss
         config = distance_loss_config or {}
         self.recon_loss = DistanceAwareLoss(**config)
         
-    def forward(
+        # Store latent dim for free bits (will be set on first call)
+        self.latent_dim = None
+        
+    def __call__(
         self,
-        predictions: torch.Tensor,
-        targets: torch.Tensor,
-        mu: torch.Tensor,
-        logvar: torch.Tensor,
-        mask: Optional[torch.Tensor] = None
+        outputs: Dict[str, torch.Tensor],
+        targets: Dict[str, torch.Tensor],
+        **kwargs
     ) -> Dict[str, torch.Tensor]:
         """
-        Calculate total VAE loss with distance awareness.
-        """
-        # Reconstruction losses
-        recon_losses = self.recon_loss(predictions, targets, mask)
+        Calculate VAE loss with distance-aware reconstruction.
         
-        # KL divergence
+        Args:
+            outputs: Dict with 'reconstruction', 'mu', 'logvar' tensors
+            targets: Dict with 'trajectories' tensor
+        """
+        predictions = outputs['reconstruction']
+        target_traj = targets['trajectories']
+        mu = outputs['mu']
+        logvar = outputs['logvar']
+        
+        # Get mask if available
+        mask = targets.get('mask', None)
+        
+        # Calculate reconstruction losses
+        recon_losses = self.recon_loss(predictions, target_traj, mask)
+        
+        # Calculate KL divergence
         kl_loss = -0.5 * torch.mean(
             1 + logvar - mu.pow(2) - logvar.exp()
         )
         
+        # Apply free bits if configured
+        if self.free_bits is not None:
+            if self.latent_dim is None:
+                self.latent_dim = mu.shape[-1]
+            kl_loss = self.free_bits.apply(kl_loss, self.latent_dim)
+        
+        # Get current beta
+        beta = self.beta_scheduler.get_beta(self.current_step, self.current_epoch)
+        
         # Total VAE loss
-        total_loss = recon_losses['total'] + self.beta * kl_loss
+        total_loss = recon_losses['total'] + beta * kl_loss
         
         return {
             'loss': total_loss,
-            'recon_loss': recon_losses['total'],
+            'reconstruction_loss': recon_losses['total'],
             'kl_loss': kl_loss,
+            'beta': beta,
             **{f'recon_{k}': v for k, v in recon_losses.items() if k != 'total'}
         }

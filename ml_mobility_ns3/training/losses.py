@@ -341,8 +341,11 @@ class SimpleVAELoss(BaseLoss):
 
 
 # Loss factory
+from ml_mobility_ns3.training.distance_aware_loss import DistanceVAELoss
+
 LOSS_REGISTRY = {
     'simple_vae': SimpleVAELoss,
+    'distance_vae': DistanceVAELoss,
 }
 
 
