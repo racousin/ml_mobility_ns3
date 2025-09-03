@@ -36,7 +36,7 @@ training:
       beta:
         type: adaptive_slow_annealing
         params:
-          initial_beta: 0.00001
+          initial_beta: 0.001
           target_beta: 1.0
           beta_increment: 0.05  # Slightly faster than base config
           patience_epochs: 20  # Balance between speed and stability
