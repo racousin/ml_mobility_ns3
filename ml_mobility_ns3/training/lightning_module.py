@@ -253,7 +253,7 @@ class TrajectoryLightningModule(pl.LightningModule):
                     logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} val_loss: {avg_val_loss:.6f}")
         
         # Define key metrics to aggregate - VAE metrics
-        key_metrics = ['mse', 'speed_mae', 'distance_mae', 'total_distance_mae', 'bird_distance_mae']
+        key_metrics = ['mse', 'speed_mae', 'distance_mae', 'total_distance_mae', 'bird_distance_mae', 'consecutive_distance_mae']
         
         # Aggregate metrics
         avg_metrics = {}
