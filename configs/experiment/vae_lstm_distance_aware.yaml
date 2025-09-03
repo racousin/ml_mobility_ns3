@@ -43,9 +43,9 @@ training:
           improvement_threshold: 1e-4
       distance_loss_config:
         coordinate_weight: 0.00  # Remove coordinate MSE - not useful for trajectories
-        point_distance_weight: 1  # Real point-to-point distance errors
-        consecutive_distance_weight: 0.0  # Ensures smooth spacing between points
-        cumulative_distance_weight: 0.0  # Total trajectory accuracy
+        point_distance_weight: 0.15  # Real point-to-point distance errors
+        consecutive_distance_weight: 0.05  # Ensures smooth spacing between points
+        cumulative_distance_weight: 0.8  # Total trajectory accuracy
       free_bits:
         enabled: false
         lambda_free_bits: 2.0
