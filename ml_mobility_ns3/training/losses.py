@@ -304,12 +304,12 @@ class SimpleVAELoss(BaseLoss):
         # Ensure numerical stability
         logvar = torch.clamp(logvar, min=-10, max=10)
         
-        # Reconstruction loss (MSE)
+        # Reconstruction loss (MSE) - scaled by 100 to match KL magnitude
         mask_expanded = mask.unsqueeze(-1).expand_as(x)
         valid_positions = mask_expanded.bool()
         valid_recon = recon[valid_positions]
         valid_x = x[valid_positions] 
-        recon_loss = F.mse_loss(valid_recon, valid_x)
+        recon_loss = F.mse_loss(valid_recon, valid_x) * 100.0
         
         # KL divergence
         kl_loss = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
