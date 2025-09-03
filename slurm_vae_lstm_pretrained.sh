@@ -4,9 +4,8 @@
 #SBATCH --error=logs/slurm_%j.err
 #SBATCH --time=24:00:00
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --partition=electronic
-#SBATCH --nodelist=kavinsky
 #SBATCH --gres=gpu:1
 
 # Load modules (adjust based on your cluster)
