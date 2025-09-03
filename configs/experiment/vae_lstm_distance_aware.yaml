@@ -42,10 +42,10 @@ training:
           patience_epochs: 40  # Balance between speed and stability
           improvement_threshold: 1e-4
       distance_loss_config:
-        coordinate_weight: 0.05  # Remove coordinate MSE - not useful for trajectories
-        point_distance_weight: 0.3  # Real point-to-point distance errors
-        consecutive_distance_weight: 0.3  # Ensures smooth spacing between points
-        cumulative_distance_weight: 0.35  # Total trajectory accuracy
+        coordinate_weight: 0.00  # Remove coordinate MSE - not useful for trajectories
+        point_distance_weight: 1  # Real point-to-point distance errors
+        consecutive_distance_weight: 0.0  # Ensures smooth spacing between points
+        cumulative_distance_weight: 0.0  # Total trajectory accuracy
       free_bits:
         enabled: false
         lambda_free_bits: 2.0
