@@ -36,13 +36,13 @@ training:
       beta:
         type: adaptive_slow_annealing
         params:
-          initial_beta: 0.12
+          initial_beta: 0.1
           target_beta: 1.0
-          beta_increment: 0.01
+          beta_increment: 0.05
           patience_epochs: 50
           improvement_threshold: 1e-4
       free_bits:
-        enabled: true
+        enabled: false
         lambda_free_bits: 2.0
 
 # Device configuration
