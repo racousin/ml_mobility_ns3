@@ -21,7 +21,7 @@ class DistanceAwareLoss(nn.Module):
         scaler_path: Optional[Union[str, Path]] = None,
         coordinate_weight: float = 0.3,
         point_distance_weight: float = 0.3,
-        speed_weight: float = 0.2,
+        consecutive_distance_weight: float = 0.2,  # Replaces speed_weight
         cumulative_distance_weight: float = 0.2,
     ):
         super().__init__()
@@ -45,7 +45,7 @@ class DistanceAwareLoss(nn.Module):
             
         self.coordinate_weight = coordinate_weight
         self.point_distance_weight = point_distance_weight
-        self.speed_weight = speed_weight
+        self.consecutive_distance_weight = consecutive_distance_weight
         self.cumulative_distance_weight = cumulative_distance_weight
     
     def load_scaler(self, scaler_path: Union[str, Path]):
@@ -101,24 +101,19 @@ class DistanceAwareLoss(nn.Module):
         point_distances_km = point_distances * 111.0
         losses['point_distance'] = (point_distances_km * mask).sum() / mask.sum()
         
-        # 3. Speed matching (if available in features)
-        if pred_real.shape[-1] >= 3:
-            # Use the speed feature directly (in km/h)
-            speed_pred = pred_real[:, :, 2]
-            speed_target = target_real[:, :, 2]
-            speed_diff = torch.abs(speed_pred - speed_target)
-            losses['speed_diff'] = (speed_diff * mask).sum() / mask.sum()
-        else:
-            # Fallback: compute from consecutive points
-            pred_speeds = torch.norm(
-                pred_real[:, 1:, :2] - pred_real[:, :-1, :2], dim=-1
-            ) * 111.0  # Convert to km
-            target_speeds = torch.norm(
-                target_real[:, 1:, :2] - target_real[:, :-1, :2], dim=-1
-            ) * 111.0
-            speed_diff = torch.abs(pred_speeds - target_speeds)
-            speed_mask = mask[:, 1:] * mask[:, :-1]
-            losses['speed_diff'] = (speed_diff * speed_mask).sum() / speed_mask.sum()
+        # 3. Consecutive distance matching - ensures smooth trajectories
+        # Compute distances between consecutive points
+        pred_distances = torch.norm(
+            pred_real[:, 1:, :2] - pred_real[:, :-1, :2], dim=-1
+        ) * 111.0  # Convert degrees to km
+        target_distances = torch.norm(
+            target_real[:, 1:, :2] - target_real[:, :-1, :2], dim=-1
+        ) * 111.0
+        
+        # This ensures consistent spacing between points
+        consecutive_diff = torch.abs(pred_distances - target_distances)
+        consecutive_mask = mask[:, 1:] * mask[:, :-1]  # Both points must be valid
+        losses['consecutive_distance_diff'] = (consecutive_diff * consecutive_mask).sum() / consecutive_mask.sum()
         
         # 4. Cumulative trajectory distance
         pred_cumulative = self._compute_trajectory_length(pred_real, mask)
@@ -142,12 +137,12 @@ class DistanceAwareLoss(nn.Module):
         losses['bird_distance_diff'] = torch.abs(pred_bird - target_bird).mean()
         
         # Combine with weights
-        # Note: point_distance is already in km, speed_diff in km/h, trajectory_length_diff in km
+        # Note: all distance metrics are in km
         # Normalize by typical values to balance the loss components
         total_loss = (
             self.coordinate_weight * losses['coord_mse'] +
             self.point_distance_weight * losses['point_distance'] / 10.0 +  # Typical error ~10km
-            self.speed_weight * losses['speed_diff'] / 50.0 +  # Typical speed ~50km/h  
+            self.consecutive_distance_weight * losses['consecutive_distance_diff'] / 5.0 +  # Typical spacing ~5km  
             self.cumulative_distance_weight * losses['trajectory_length_diff'] / 100.0  # Typical trajectory ~100km
         )
         

@@ -105,11 +105,24 @@ class DiffMetrics:
         pred_original = self._inverse_transform_trajectories(pred)
         target_original = self._inverse_transform_trajectories(target)
         
-        # Speed MAE (in km/h)
-        speed_pred = pred_original[:, :, 2]  # Last feature is speed
-        speed_target = target_original[:, :, 2]
-        speed_mae = torch.abs(speed_pred - speed_target)
-        speed_mae = (speed_mae * mask).sum() / (mask.sum() + 1e-8)
+        # Speed MAE - computed from actual consecutive point distances
+        # NOT using the 3rd feature which may be informative but not reflect true speed
+        # Compute distances between consecutive points
+        pred_distances = torch.sqrt(
+            (pred_original[:, 1:, 0] - pred_original[:, :-1, 0])**2 + 
+            (pred_original[:, 1:, 1] - pred_original[:, :-1, 1])**2 + 1e-8
+        ) * 111.0  # Convert degrees to km
+        
+        target_distances = torch.sqrt(
+            (target_original[:, 1:, 0] - target_original[:, :-1, 0])**2 + 
+            (target_original[:, 1:, 1] - target_original[:, :-1, 1])**2 + 1e-8
+        ) * 111.0  # Convert degrees to km
+        
+        # Assuming uniform time intervals, speed proportional to distance
+        # This measures consistency of point spacing
+        speed_mae = torch.abs(pred_distances - target_distances)
+        speed_mask = mask[:, 1:] * mask[:, :-1]  # Both points must be valid
+        speed_mae = (speed_mae * speed_mask).sum() / (speed_mask.sum() + 1e-8)
         
         # Distance MAE (point-to-point distances)
         lat_pred = pred_original[:, :, 0]
@@ -136,7 +149,8 @@ class DiffMetrics:
         bird_distance_mae = torch.abs(pred_bird_dist - target_bird_dist).mean()
         
         return {
-            'speed_mae': speed_mae.item(),
+            'speed_mae': speed_mae.item(),  # Kept for backward compatibility
+            'consecutive_distance_mae': speed_mae.item(),  # More accurate name
             'distance_mae': distance_mae.item(),
             'total_distance_mae': total_distance_mae.item(),
             'bird_distance_mae': bird_distance_mae.item()
