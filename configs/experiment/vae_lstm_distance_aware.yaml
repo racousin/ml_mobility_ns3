@@ -18,7 +18,7 @@ training:
   pretrained_checkpoint: experiments/vae_lstm_2025-09-02_09-27-49/checkpoints/last.ckpt
   
   # Basic training parameters
-  batch_size: 128
+  batch_size: 256
   epochs: 20000
   learning_rate: 0.0001
   val_split: 0.1
@@ -38,7 +38,7 @@ training:
         params:
           initial_beta: 0.00001
           target_beta: 1.0
-          beta_increment: 0.01  # Slightly faster than base config
+          beta_increment: 0.05  # Slightly faster than base config
           patience_epochs: 20  # Balance between speed and stability
           improvement_threshold: 5e-5
       distance_loss_config:
