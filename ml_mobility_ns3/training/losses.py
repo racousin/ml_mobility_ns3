@@ -76,7 +76,7 @@ class ExponentialAnnealingBeta(BetaScheduler):
             return self.end
         
         # Use exponential decay formula
-        beta = self.end - (self.end - self.start) * (self.rate ** (progress * 3000))
+        beta = self.end - (self.end - self.start) * (self.rate ** (progress * 100))
         return max(self.start, min(self.end, beta))
 
 
@@ -309,7 +309,7 @@ class SimpleVAELoss(BaseLoss):
         valid_positions = mask_expanded.bool()
         valid_recon = recon[valid_positions]
         valid_x = x[valid_positions] 
-        recon_loss = F.mse_loss(valid_recon, valid_x) * 100.0
+        recon_loss = F.mse_loss(valid_recon, valid_x) * 3000.0
         
         # KL divergence
         kl_loss = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
