@@ -140,7 +140,7 @@ def inverse_transform_trajectories(trajectories, scalers):
     
     return transformed_trajectories
 
-def create_interactive_map(trajectories: List[Dict], output_file: str = "all_generated_trajectories2.html"):
+def create_interactive_map(trajectories: List[Dict], output_file: str = "all_generated_trajectories3.html"):
     """Create an interactive Folium map with all generated trajectories."""
     
     # Define colors for each transport mode
@@ -278,7 +278,7 @@ def create_interactive_map(trajectories: List[Dict], output_file: str = "all_gen
 def main():
     """Main execution function."""
     # Set paths
-    experiment_path = Path("experiments/vae_lstm_2025-08-26_10-32-38")
+    experiment_path = Path("experiments/vae_lstm_2025-09-02_09-27-49")
     preprocessing_dir = Path("data/processed")
     output_file = "all_generated_trajectories2.html"
     
@@ -289,7 +289,6 @@ def main():
     # Load model
     print("Loading model from experiment...")
     model, model_info = load_model_from_experiment(experiment_path, device)
-    print(f"Model loaded: {model_info['model_type']} (epoch {model_info['best_metrics']['epoch']})")
     
     # Load scalers
     print("Loading data scalers...")

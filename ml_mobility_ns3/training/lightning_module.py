@@ -237,13 +237,16 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Calculate average validation loss for adaptive scheduler
         avg_val_loss = sum(out['loss'].item() for out in self._validation_outputs) / len(self._validation_outputs)
         
-        # Update adaptive scheduler with epoch-level validation loss (reconstruction loss preferably)
+        # Update adaptive scheduler with epoch-level validation loss (complete loss = recon + KL without beta)
         if hasattr(self.loss_fn, 'update_adaptive_scheduler_epoch'):
-            # Get average reconstruction loss if available
-            if 'loss_components' in self._validation_outputs[0] and 'recon_loss' in self._validation_outputs[0]['loss_components']:
+            # Calculate complete loss (MSE + KL without beta weighting) if components are available
+            if 'loss_components' in self._validation_outputs[0] and 'recon_loss' in self._validation_outputs[0]['loss_components'] and 'kl_loss' in self._validation_outputs[0]['loss_components']:
                 avg_recon_loss = sum(out['loss_components']['recon_loss'].item() for out in self._validation_outputs) / len(self._validation_outputs)
-                self.loss_fn.update_adaptive_scheduler_epoch(self.current_epoch, avg_recon_loss)
-                logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} recon loss: {avg_recon_loss:.6f}")
+                avg_kl_loss = sum(out['loss_components']['kl_loss'].item() for out in self._validation_outputs) / len(self._validation_outputs)
+                # Complete loss = MSE + KL (without the beta weighting)
+                complete_loss = avg_recon_loss + avg_kl_loss
+                self.loss_fn.update_adaptive_scheduler_epoch(self.current_epoch, complete_loss)
+                logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} complete loss: {complete_loss:.6f} (recon: {avg_recon_loss:.6f}, kl: {avg_kl_loss:.6f})")
             else:
                 self.loss_fn.update_adaptive_scheduler_epoch(self.current_epoch, avg_val_loss)
                 logger.info(f"Updated adaptive scheduler with epoch {self.current_epoch} total loss: {avg_val_loss:.6f}")
