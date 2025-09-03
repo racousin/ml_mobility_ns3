@@ -166,26 +166,28 @@ class DistanceVAELoss(BaseLoss):
         # Store latent dim for free bits (will be set on first call)
         self.latent_dim = None
         
+        # Track if we're using adaptive scheduler
+        from ml_mobility_ns3.training.losses import AdaptiveSlowAnnealingBeta
+        self.is_adaptive = isinstance(self.beta_scheduler, AdaptiveSlowAnnealingBeta)
+        
     def __call__(
         self,
         outputs: Dict[str, torch.Tensor],
         targets: Dict[str, torch.Tensor],
-        **kwargs
+        mask: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
         """
         Calculate VAE loss with distance-aware reconstruction.
         
         Args:
-            outputs: Dict with 'reconstruction', 'mu', 'logvar' tensors
-            targets: Dict with 'trajectories' tensor
+            outputs: Dict with 'recon', 'mu', 'logvar' tensors
+            targets: Dict with 'x' tensor (trajectories)
+            mask: Binary mask for valid points
         """
-        predictions = outputs['reconstruction']
-        target_traj = targets['trajectories']
+        predictions = outputs['recon']
+        target_traj = targets['x']
         mu = outputs['mu']
         logvar = outputs['logvar']
-        
-        # Get mask if available
-        mask = targets.get('mask', None)
         
         # Calculate reconstruction losses
         recon_losses = self.recon_loss(predictions, target_traj, mask)
@@ -214,3 +216,14 @@ class DistanceVAELoss(BaseLoss):
             'beta': beta,
             **{f'recon_{k}': v for k, v in recon_losses.items() if k != 'total'}
         }
+    
+    def update_adaptive_scheduler_epoch(self, epoch: int, loss: float):
+        """Update adaptive scheduler with epoch-level loss if applicable."""
+        if self.is_adaptive:
+            self.beta_scheduler.update_epoch_loss(epoch, loss)
+    
+    def get_scheduler_status(self) -> Optional[Dict[str, Any]]:
+        """Get scheduler status if adaptive."""
+        if self.is_adaptive:
+            return self.beta_scheduler.get_status()
+        return None
