@@ -18,11 +18,11 @@ training:
   pretrained_checkpoint: experiments/vae_lstm_2025-09-02_09-27-49/checkpoints/last.ckpt
   
   # Basic training parameters
-  batch_size: 128
+  batch_size: 256
   epochs: 20000
   learning_rate: 0.0001
   val_split: 0.1
-  gradient_clip: 1.0
+  gradient_clip: null
   
   # Early stopping and LR scheduling
   early_stopping_enabled: false
@@ -36,11 +36,11 @@ training:
       beta:
         type: adaptive_slow_annealing
         params:
-          initial_beta: 0.00001
-          target_beta: 1.0
-          beta_increment: 0.0001  # Much smaller increments (20x smaller)
-          patience_epochs: 20  # More patience before increasing
-          improvement_threshold: 5e-5  # Smaller threshold for more sensitivity
+          initial_beta: 0.000001
+          target_beta: 0.3
+          beta_increment: 0.001  # Much smaller increments (20x smaller)
+          patience_epochs: 50  # More patience before increasing
+          improvement_threshold: 1e-5  # Smaller threshold for more sensitivity
       free_bits:
         enabled: false
         lambda_free_bits: 2.0

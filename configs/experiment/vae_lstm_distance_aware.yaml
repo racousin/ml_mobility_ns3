@@ -36,11 +36,11 @@ training:
       beta:
         type: adaptive_slow_annealing
         params:
-          initial_beta: 0
+          initial_beta: 0.000001
           target_beta: 0.3
-          beta_increment: 0.01  # Slightly faster than base config
+          beta_increment: 0.005  # Slightly faster than base config
           patience_epochs: 40  # Balance between speed and stability
-          improvement_threshold: 1e-4
+          improvement_threshold: 1e-5
       distance_loss_config:
         coordinate_weight: 0.00  # Remove coordinate MSE - not useful for trajectories
         point_distance_weight: 0.15  # Real point-to-point distance errors
