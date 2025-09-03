@@ -38,9 +38,9 @@ training:
         params:
           initial_beta: 0.00001
           target_beta: 1.0
-          beta_increment: 0.002
-          patience_epochs: 10
-          improvement_threshold: 1e-4
+          beta_increment: 0.0001  # Much smaller increments (20x smaller)
+          patience_epochs: 20  # More patience before increasing
+          improvement_threshold: 5e-5  # Smaller threshold for more sensitivity
       free_bits:
         enabled: false
         lambda_free_bits: 2.0
