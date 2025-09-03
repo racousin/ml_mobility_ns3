@@ -137,13 +137,15 @@ class DistanceAwareLoss(nn.Module):
         losses['bird_distance_diff'] = torch.abs(pred_bird - target_bird).mean()
         
         # Combine with weights
-        # Note: all distance metrics are in km
-        # Normalize by typical values to balance the loss components
+        # For walking trajectories with 2-second intervals:
+        # - point_distance: target < 1 km (no normalization needed)
+        # - consecutive_distance_diff: ~0.001-0.005 km (multiply by 500 to scale)
+        # - trajectory_length_diff: target ~1 km (no normalization needed)
         total_loss = (
             self.coordinate_weight * losses['coord_mse'] +
-            self.point_distance_weight * losses['point_distance'] / 10.0 +  # Typical error ~10km
-            self.consecutive_distance_weight * losses['consecutive_distance_diff'] / 5.0 +  # Typical spacing ~5km  
-            self.cumulative_distance_weight * losses['trajectory_length_diff'] / 100.0  # Typical trajectory ~100km
+            self.point_distance_weight * losses['point_distance'] +  # Target < 1 km
+            self.consecutive_distance_weight * losses['consecutive_distance_diff'] * 500.0 +  # Scale tiny differences  
+            self.cumulative_distance_weight * losses['trajectory_length_diff']  # Target ~1 km
         )
         
         losses['total'] = total_loss

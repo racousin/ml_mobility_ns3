@@ -290,6 +290,8 @@ class TrajectoryLightningModule(pl.LightningModule):
                     logger.info(f"MSE (scaled):        {value:>10.6f}")
                 elif metric_name == 'speed_mae':
                     logger.info(f"Speed MAE (km/h):    {value:>10.3f}")
+                elif metric_name == 'consecutive_distance_mae':
+                    logger.info(f"Consec Dist MAE (km):{value:>10.3f}")
                 elif metric_name == 'distance_mae':
                     logger.info(f"Point Dist MAE (km): {value:>10.3f}")
                 elif metric_name == 'total_distance_mae':
