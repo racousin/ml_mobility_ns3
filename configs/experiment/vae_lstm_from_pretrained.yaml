@@ -36,10 +36,10 @@ training:
       beta:
         type: adaptive_slow_annealing
         params:
-          initial_beta: 0.05
+          initial_beta: 0.00001
           target_beta: 1.0
-          beta_increment: 0.05
-          patience_epochs: 50
+          beta_increment: 0.002
+          patience_epochs: 10
           improvement_threshold: 1e-4
       free_bits:
         enabled: false
