@@ -41,11 +41,12 @@ class DistanceAwareLoss(nn.Module):
             targets: (batch, seq_len, 2) normalized coordinates
             mask: (batch, seq_len) binary mask for valid points
         """
-        # Denormalize if scaler provided
+        # Denormalize coordinates to real space
         if self.scaler is not None:
             pred_real = self._denormalize(predictions)
             target_real = self._denormalize(targets)
         else:
+            # Simple scaling if no scaler provided
             pred_real = predictions * self.scale_factor
             target_real = targets * self.scale_factor
             
@@ -190,7 +191,12 @@ class DistanceVAELoss(BaseLoss):
         logvar = outputs['logvar']
         
         # Calculate reconstruction losses
-        recon_losses = self.recon_loss(predictions, target_traj, mask)
+        try:
+            recon_losses = self.recon_loss(predictions, target_traj, mask)
+            if 'total' not in recon_losses:
+                raise KeyError(f"'total' key missing from recon_losses. Keys: {list(recon_losses.keys())}")
+        except Exception as e:
+            raise RuntimeError(f"Error computing reconstruction loss: {e}")
         
         # Calculate KL divergence
         kl_loss = -0.5 * torch.mean(
