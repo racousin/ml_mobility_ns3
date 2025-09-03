@@ -36,16 +36,16 @@ training:
       beta:
         type: adaptive_slow_annealing
         params:
-          initial_beta: 0.001
-          target_beta: 1.0
-          beta_increment: 0.05  # Slightly faster than base config
-          patience_epochs: 20  # Balance between speed and stability
-          improvement_threshold: 5e-5
+          initial_beta: 0
+          target_beta: 0.3
+          beta_increment: 0.01  # Slightly faster than base config
+          patience_epochs: 40  # Balance between speed and stability
+          improvement_threshold: 1e-4
       distance_loss_config:
-        coordinate_weight: 0.2  # Lower weight for normalized MSE
-        point_distance_weight: 0.4  # High weight for real distance errors
-        speed_weight: 0.05  # Important for mobility simulation
-        cumulative_distance_weight: 0.35  # Total trajectory accuracy
+        coordinate_weight: 0.1  # Lower weight for normalized MSE
+        point_distance_weight: 0.5  # High weight for real distance errors
+        speed_weight: 0.01  # Important for mobility simulation
+        cumulative_distance_weight: 0.39  # Total trajectory accuracy
       free_bits:
         enabled: false
         lambda_free_bits: 2.0
