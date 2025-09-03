@@ -38,8 +38,8 @@ training:
         params:
           initial_beta: 0.00001
           target_beta: 1.0
-          beta_increment: 0.0002  # Slightly faster than base config
-          patience_epochs: 15  # Balance between speed and stability
+          beta_increment: 0.01  # Slightly faster than base config
+          patience_epochs: 20  # Balance between speed and stability
           improvement_threshold: 5e-5
       distance_loss_config:
         coordinate_weight: 0.2  # Lower weight for normalized MSE
