@@ -1,31 +1,63 @@
 import torch
 import torch.nn as nn
+import pickle
+import logging
+from pathlib import Path
 from typing import Dict, Optional, Any, Union
 from ml_mobility_ns3.training.losses import BaseLoss, create_beta_scheduler, FreeBits
+
+logger = logging.getLogger(__name__)
 
 
 class DistanceAwareLoss(nn.Module):
     """
     Reconstruction loss that prioritizes real-world distance metrics
     over pixel-perfect coordinate matching.
+    Uses the same inverse transform approach as DiffMetrics for consistency.
     """
     
     def __init__(
         self, 
-        scaler=None,
+        scaler_path: Optional[Union[str, Path]] = None,
         coordinate_weight: float = 0.3,
         point_distance_weight: float = 0.3,
         speed_weight: float = 0.2,
         cumulative_distance_weight: float = 0.2,
-        scale_factor: float = 100.0  # km scale for your data
     ):
         super().__init__()
-        self.scaler = scaler
+        self.scaler = None
+        
+        # Load scaler using the same approach as DiffMetrics
+        if scaler_path is None:
+            # Try default paths
+            default_paths = [
+                Path('data/processed/scalers.pkl'),
+                Path('../data/processed/scalers.pkl'),
+                Path('../../data/processed/scalers.pkl'),
+            ]
+            for path in default_paths:
+                if path.exists():
+                    scaler_path = path
+                    break
+        
+        if scaler_path:
+            self.load_scaler(scaler_path)
+            
         self.coordinate_weight = coordinate_weight
         self.point_distance_weight = point_distance_weight
         self.speed_weight = speed_weight
         self.cumulative_distance_weight = cumulative_distance_weight
-        self.scale_factor = scale_factor
+    
+    def load_scaler(self, scaler_path: Union[str, Path]):
+        """Load scaler from pickle file (same as DiffMetrics)."""
+        try:
+            with open(scaler_path, 'rb') as f:
+                scalers = pickle.load(f)
+                self.scaler = scalers.get('trajectory')
+                logger.info(f"DistanceAwareLoss: Loaded scaler from {scaler_path}")
+        except Exception as e:
+            logger.warning(f"DistanceAwareLoss: Could not load scaler from {scaler_path}: {e}")
+            self.scaler = None
         
     def forward(
         self, 
@@ -37,18 +69,13 @@ class DistanceAwareLoss(nn.Module):
         Calculate distance-aware reconstruction loss.
         
         Args:
-            predictions: (batch, seq_len, 2) normalized coordinates
-            targets: (batch, seq_len, 2) normalized coordinates
+            predictions: (batch, seq_len, 3) normalized coordinates with speed
+            targets: (batch, seq_len, 3) normalized coordinates with speed
             mask: (batch, seq_len) binary mask for valid points
         """
-        # Denormalize coordinates to real space
-        if self.scaler is not None:
-            pred_real = self._denormalize(predictions)
-            target_real = self._denormalize(targets)
-        else:
-            # Simple scaling if no scaler provided
-            pred_real = predictions * self.scale_factor
-            target_real = targets * self.scale_factor
+        # Inverse transform to get real GPS coordinates (lat, lon, speed)
+        pred_real = self._inverse_transform_trajectories(predictions)
+        target_real = self._inverse_transform_trajectories(targets)
             
         if mask is None:
             mask = torch.ones(predictions.shape[:2], device=predictions.device)
@@ -59,20 +86,39 @@ class DistanceAwareLoss(nn.Module):
         coord_loss = ((predictions - targets) ** 2).sum(-1)
         losses['coord_mse'] = (coord_loss * mask).sum() / mask.sum()
         
-        # 2. Point-to-point distance error (real space)
-        point_distances = torch.norm(pred_real - target_real, dim=-1)
-        losses['point_distance'] = (point_distances * mask).sum() / mask.sum()
+        # 2. Point-to-point distance error (real space in km)
+        # Extract lat/lon coordinates
+        lat_pred = pred_real[:, :, 0]
+        lon_pred = pred_real[:, :, 1]
+        lat_target = target_real[:, :, 0]
+        lon_target = target_real[:, :, 1]
         
-        # 3. Speed/velocity matching (consecutive point distances)
-        pred_speeds = torch.norm(
-            pred_real[:, 1:] - pred_real[:, :-1], dim=-1
+        # Euclidean distance in degrees
+        point_distances = torch.sqrt(
+            (lat_pred - lat_target)**2 + (lon_pred - lon_target)**2 + 1e-8
         )
-        target_speeds = torch.norm(
-            target_real[:, 1:] - target_real[:, :-1], dim=-1
-        )
-        speed_diff = torch.abs(pred_speeds - target_speeds)
-        speed_mask = mask[:, 1:] * mask[:, :-1]  # Both points must be valid
-        losses['speed_diff'] = (speed_diff * speed_mask).sum() / speed_mask.sum()
+        # Convert to km (approximate: 1 degree ≈ 111 km)
+        point_distances_km = point_distances * 111.0
+        losses['point_distance'] = (point_distances_km * mask).sum() / mask.sum()
+        
+        # 3. Speed matching (if available in features)
+        if pred_real.shape[-1] >= 3:
+            # Use the speed feature directly (in km/h)
+            speed_pred = pred_real[:, :, 2]
+            speed_target = target_real[:, :, 2]
+            speed_diff = torch.abs(speed_pred - speed_target)
+            losses['speed_diff'] = (speed_diff * mask).sum() / mask.sum()
+        else:
+            # Fallback: compute from consecutive points
+            pred_speeds = torch.norm(
+                pred_real[:, 1:, :2] - pred_real[:, :-1, :2], dim=-1
+            ) * 111.0  # Convert to km
+            target_speeds = torch.norm(
+                target_real[:, 1:, :2] - target_real[:, :-1, :2], dim=-1
+            ) * 111.0
+            speed_diff = torch.abs(pred_speeds - target_speeds)
+            speed_mask = mask[:, 1:] * mask[:, :-1]
+            losses['speed_diff'] = (speed_diff * speed_mask).sum() / speed_mask.sum()
         
         # 4. Cumulative trajectory distance
         pred_cumulative = self._compute_trajectory_length(pred_real, mask)
@@ -81,53 +127,68 @@ class DistanceAwareLoss(nn.Module):
             pred_cumulative - target_cumulative
         ).mean()
         
-        # 5. Bird distance (start to end)
+        # 5. Bird distance (start to end) in km
         # Find last valid point for each trajectory
         last_indices = (mask.sum(dim=1) - 1).long()
         batch_indices = torch.arange(predictions.shape[0], device=predictions.device)
         
-        pred_endpoints = pred_real[batch_indices, last_indices]
-        target_endpoints = target_real[batch_indices, last_indices]
-        pred_startpoints = pred_real[:, 0]
-        target_startpoints = target_real[:, 0]
+        pred_endpoints = pred_real[batch_indices, last_indices, :2]  # Only lat/lon
+        target_endpoints = target_real[batch_indices, last_indices, :2]
+        pred_startpoints = pred_real[:, 0, :2]
+        target_startpoints = target_real[:, 0, :2]
         
-        pred_bird = torch.norm(pred_endpoints - pred_startpoints, dim=-1)
-        target_bird = torch.norm(target_endpoints - target_startpoints, dim=-1)
+        pred_bird = torch.norm(pred_endpoints - pred_startpoints, dim=-1) * 111.0  # to km
+        target_bird = torch.norm(target_endpoints - target_startpoints, dim=-1) * 111.0
         losses['bird_distance_diff'] = torch.abs(pred_bird - target_bird).mean()
         
         # Combine with weights
+        # Note: point_distance is already in km, speed_diff in km/h, trajectory_length_diff in km
+        # Normalize by typical values to balance the loss components
         total_loss = (
             self.coordinate_weight * losses['coord_mse'] +
-            self.point_distance_weight * losses['point_distance'] / self.scale_factor +
-            self.speed_weight * losses['speed_diff'] / self.scale_factor +
-            self.cumulative_distance_weight * losses['trajectory_length_diff'] / self.scale_factor
+            self.point_distance_weight * losses['point_distance'] / 10.0 +  # Typical error ~10km
+            self.speed_weight * losses['speed_diff'] / 50.0 +  # Typical speed ~50km/h  
+            self.cumulative_distance_weight * losses['trajectory_length_diff'] / 100.0  # Typical trajectory ~100km
         )
         
         losses['total'] = total_loss
         return losses
     
-    def _denormalize(self, coords: torch.Tensor) -> torch.Tensor:
-        """Denormalize coordinates using fitted scaler."""
-        # Reshape for scaler
-        original_shape = coords.shape
-        coords_flat = coords.reshape(-1, 2)
+    def _inverse_transform_trajectories(self, trajectories: torch.Tensor) -> torch.Tensor:
+        """Inverse transform scaled trajectories to original GPS coordinates.
         
-        # Convert to numpy, denormalize, back to tensor
-        coords_np = coords_flat.detach().cpu().numpy()
-        coords_denorm = self.scaler.inverse_transform(coords_np)
-        coords_tensor = torch.from_numpy(coords_denorm).to(coords.device)
+        This method is identical to the one in DiffMetrics for consistency.
+        """
+        if self.scaler is None:
+            logger.warning("DistanceAwareLoss: No scaler loaded, assuming trajectories are already in original space")
+            return trajectories
         
-        return coords_tensor.reshape(original_shape)
+        # Convert to numpy for sklearn
+        device = trajectories.device
+        traj_numpy = trajectories.detach().cpu().numpy()
+        original_shape = traj_numpy.shape
+        
+        # Reshape for scaler (assumes 3 features: lat, lon, speed)
+        num_features = original_shape[-1]
+        traj_flat = traj_numpy.reshape(-1, num_features)
+        
+        # Inverse transform
+        traj_original = self.scaler.inverse_transform(traj_flat)
+        
+        # Reshape back and convert to torch
+        traj_original = traj_original.reshape(original_shape)
+        return torch.from_numpy(traj_original).to(device)
     
     def _compute_trajectory_length(
         self, 
         coords: torch.Tensor, 
         mask: torch.Tensor
     ) -> torch.Tensor:
-        """Compute total trajectory length."""
+        """Compute total trajectory length in km."""
+        # Only use lat/lon coordinates (first 2 features)
         distances = torch.norm(
-            coords[:, 1:] - coords[:, :-1], dim=-1
-        )
+            coords[:, 1:, :2] - coords[:, :-1, :2], dim=-1
+        ) * 111.0  # Convert degrees to km
         valid_distances = distances * mask[:, 1:] * mask[:, :-1]
         return valid_distances.sum(dim=1)
 
@@ -142,8 +203,8 @@ class DistanceVAELoss(BaseLoss):
         self,
         beta: Optional[Union[float, Dict[str, Any]]] = None,
         distance_loss_config: Optional[Dict] = None,
-        free_bits: Optional[Dict[str, Any]] = None,
-        **kwargs
+        scaler_path: Optional[Union[str, Path]] = None,
+        free_bits: Optional[Dict[str, Any]] = None
     ):
         super().__init__()
         
@@ -162,6 +223,9 @@ class DistanceVAELoss(BaseLoss):
         
         # Setup distance-aware reconstruction loss
         config = distance_loss_config or {}
+        # Add scaler_path to config if provided
+        if scaler_path is not None:
+            config['scaler_path'] = scaler_path
         self.recon_loss = DistanceAwareLoss(**config)
         
         # Store latent dim for free bits (will be set on first call)

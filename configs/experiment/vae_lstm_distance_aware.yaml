@@ -46,7 +46,6 @@ training:
         point_distance_weight: 0.4  # High weight for real distance errors
         speed_weight: 0.05  # Important for mobility simulation
         cumulative_distance_weight: 0.35  # Total trajectory accuracy
-        scale_factor: 100.0  # Assuming 100km normalization range
       free_bits:
         enabled: false
         lambda_free_bits: 2.0
