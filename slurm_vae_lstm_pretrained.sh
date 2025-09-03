@@ -23,7 +23,12 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
 echo "GPU: $CUDA_VISIBLE_DEVICES"
 
-# Run the training
-python scripts/train.py +experiment=vae_lstm_from_pretrained training=adaptive_training accelerator=gpu devices=[0]
+# Run the training - choose one of the following:
+
+# Option 1: Standard beta annealing with MSE loss
+# python scripts/train.py +experiment=vae_lstm_from_pretrained training=adaptive_training accelerator=gpu devices=[0]
+
+# Option 2: Distance-aware loss for better real-world metrics
+python scripts/train.py +experiment=vae_lstm_distance_aware training=adaptive_training accelerator=gpu devices=[0]
 
 echo "Training completed!"
