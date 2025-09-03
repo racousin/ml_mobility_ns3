@@ -76,7 +76,7 @@ class ExponentialAnnealingBeta(BetaScheduler):
             return self.end
         
         # Use exponential decay formula
-        beta = self.end - (self.end - self.start) * (self.rate ** (progress * 100))
+        beta = self.end - (self.end - self.start) * (self.rate ** (progress * 3000))
         return max(self.start, min(self.end, beta))
 
 
