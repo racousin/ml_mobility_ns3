@@ -215,13 +215,22 @@ class DistanceVAELoss(BaseLoss):
         # Total VAE loss
         total_loss = recon_losses['total'] + beta * kl_loss
         
-        return {
-            'loss': total_loss,
-            'reconstruction_loss': recon_losses['total'],
+        result = {
+            'total': total_loss,  # Key must be 'total' for lightning module
+            'recon_loss': recon_losses['total'],  # Use 'recon_loss' for consistency
             'kl_loss': kl_loss,
+            'weighted_kl_loss': beta * kl_loss,
             'beta': beta,
             **{f'recon_{k}': v for k, v in recon_losses.items() if k != 'total'}
         }
+        
+        # Add scheduler status if adaptive
+        if self.is_adaptive:
+            status = self.beta_scheduler.get_status()
+            result['epochs_without_improvement'] = status['epochs_without_improvement']
+            result['scheduler_converged'] = status['converged']
+            
+        return result
     
     def update_adaptive_scheduler_epoch(self, epoch: int, loss: float):
         """Update adaptive scheduler with epoch-level loss if applicable."""
