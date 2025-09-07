@@ -15,7 +15,7 @@ model:
 # Training configuration - complete config to avoid parameter conflicts
 training:
   # Path to pretrained checkpoint
-  pretrained_checkpoint: experiments/vae_lstm_2025-09-05_11-38-54/checkpoints/last.ckpt
+  pretrained_checkpoint: experiments/vae_lstm_2025-09-06_19-32-02/checkpoints/last.ckpt
   
   # Basic training parameters
   batch_size: 256
@@ -36,8 +36,8 @@ training:
       beta:
         type: adaptive_slow_annealing
         params:
-          initial_beta: 0.04
-          target_beta: 0.3
+          initial_beta: 0.2400
+          target_beta: 1
           beta_increment: 0.05  # Much smaller increments (20x smaller)
           patience_epochs: 50  # More patience before increasing
           improvement_threshold: 1e-5  # Smaller threshold for more sensitivity
