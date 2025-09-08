@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class TrajectoryLightningModule(pl.LightningModule):
     """Lightning module for trajectory generation models."""
     
-    def __init__(self, config):
+    def __init__(self, config, skip_loss_init=False):
         super().__init__()
         self.config = config
         self.save_hyperparameters()
@@ -27,8 +27,12 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Load pretrained weights if specified
         self._load_pretrained_weights()
         
-        # Initialize loss function
-        self._init_loss()
+        # Initialize loss function only if not skipping (for evaluation mode)
+        if not skip_loss_init:
+            self._init_loss()
+        else:
+            self.loss_fn = None
+            logger.info("Skipping loss initialization (evaluation mode)")
         
         # Initialize metrics
         self.metrics = DiffMetrics()

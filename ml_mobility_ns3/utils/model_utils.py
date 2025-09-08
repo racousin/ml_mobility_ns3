@@ -21,8 +21,17 @@ def deep_merge(base: Dict, update: Dict) -> Dict:
 def load_checkpoint(checkpoint_path: Path, 
                    cfg: DictConfig,
                    lightning_module_class,
-                   device: str = 'cpu') -> Any:
-    """Load a model from checkpoint with proper error handling."""
+                   device: str = 'cpu',
+                   skip_loss_init: bool = True) -> Any:
+    """Load a model from checkpoint with proper error handling.
+    
+    Args:
+        checkpoint_path: Path to the checkpoint file
+        cfg: Configuration object
+        lightning_module_class: Lightning module class to instantiate
+        device: Device to load the model on
+        skip_loss_init: Skip loss function initialization (for evaluation mode)
+    """
     logger.info(f"Loading model from {checkpoint_path}")
     
     try:
@@ -38,6 +47,7 @@ def load_checkpoint(checkpoint_path: Path,
         model = lightning_module_class.load_from_checkpoint(
             checkpoint_path,
             config=cfg,
+            skip_loss_init=skip_loss_init,
             map_location=device,
             strict=False  # Allow missing/unexpected keys
         )
@@ -53,8 +63,8 @@ def load_checkpoint(checkpoint_path: Path,
             logger.info("Trying alternative loading method...")
             checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
             
-            # Create new model instance
-            model = lightning_module_class(cfg)
+            # Create new model instance with skip_loss_init
+            model = lightning_module_class(cfg, skip_loss_init=skip_loss_init)
             
             # Load state dict
             model.load_state_dict(checkpoint['state_dict'], strict=False)

@@ -278,7 +278,7 @@ def create_interactive_map(trajectories: List[Dict], output_file: str = "all_gen
 def main():
     """Main execution function."""
     # Set paths
-    experiment_path = Path("experiments/vae_lstm_2025-09-02_09-27-49")
+    experiment_path = Path("experiments/vae_lstm_2025-09-07_20-55-25")
     preprocessing_dir = Path("data/processed")
     output_file = "all_generated_trajectories3.html"
     
