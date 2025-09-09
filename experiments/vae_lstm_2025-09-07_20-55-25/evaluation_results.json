@@ -1,0 +1,117 @@
+{
+  "generated_stats": {
+    "BIKE": {
+      "sequences": 6115,
+      "duration_mean": 19.58750613246116,
+      "duration_std": 15.031509468461827,
+      "total_distance_mean": 5.0144218656535235,
+      "total_distance_std": 4.791591445592221,
+      "bird_distance_mean": 2.7544912690212597,
+      "bird_distance_std": 2.9254104491152004,
+      "speed_mean": 10.485381083184349,
+      "speed_std": 2.125786081059095
+    },
+    "CAR": {
+      "sequences": 25876,
+      "duration_mean": 19.534084351007373,
+      "duration_std": 15.73848616718512,
+      "total_distance_mean": 12.995030809944206,
+      "total_distance_std": 16.85020777911878,
+      "bird_distance_mean": 5.809774605576477,
+      "bird_distance_std": 6.3429876539712415,
+      "speed_mean": 25.181050922744372,
+      "speed_std": 13.725113537691687
+    },
+    "MIXED": {
+      "sequences": 9528,
+      "duration_mean": 39.35869017632242,
+      "duration_std": 21.80197420432585,
+      "total_distance_mean": 20.380599254703167,
+      "total_distance_std": 33.53008454673631,
+      "bird_distance_mean": 6.281410972156856,
+      "bird_distance_std": 6.941603362627092,
+      "speed_mean": 17.271589737354233,
+      "speed_std": 12.691124957541117
+    },
+    "PUBLIC_TRANSPORT": {
+      "sequences": 10012,
+      "duration_mean": 27.738007724064456,
+      "duration_std": 18.14323497976565,
+      "total_distance_mean": 8.802746467729877,
+      "total_distance_std": 15.05073026444103,
+      "bird_distance_mean": 3.9553701969490125,
+      "bird_distance_std": 4.326923225104936,
+      "speed_mean": 10.521845525449876,
+      "speed_std": 9.043674043715054
+    },
+    "WALKING": {
+      "sequences": 20135,
+      "duration_mean": 12.063799354358084,
+      "duration_std": 11.49246512412709,
+      "total_distance_mean": 7.638445151652581,
+      "total_distance_std": 13.071103655890457,
+      "bird_distance_mean": 2.554306106774048,
+      "bird_distance_std": 2.834985460882432,
+      "speed_mean": 3.414985177278341,
+      "speed_std": 0.6457149111791642
+    }
+  },
+  "real_stats": {
+    "BIKE": {
+      "sequences": 6115,
+      "duration_mean": 19.58750613246116,
+      "duration_std": 15.031509468461827,
+      "total_distance_mean": 5.654739046680421,
+      "total_distance_std": 5.61342180169458,
+      "bird_distance_mean": 3.845633459186321,
+      "bird_distance_std": 4.096929630191162,
+      "speed_mean": 10.587885719915137,
+      "speed_std": 5.158450862216161
+    },
+    "CAR": {
+      "sequences": 25876,
+      "duration_mean": 19.534084351007373,
+      "duration_std": 15.73848616718512,
+      "total_distance_mean": 12.562472854240056,
+      "total_distance_std": 14.798751694940185,
+      "bird_distance_mean": 8.436762435734423,
+      "bird_distance_std": 10.832845542907016,
+      "speed_mean": 25.732962796015926,
+      "speed_std": 16.212696219352466
+    },
+    "MIXED": {
+      "sequences": 9528,
+      "duration_mean": 39.35869017632242,
+      "duration_std": 21.80197420432585,
+      "total_distance_mean": 17.933245150646858,
+      "total_distance_std": 16.560289118718636,
+      "bird_distance_mean": 13.510133944145233,
+      "bird_distance_std": 13.549523674920673,
+      "speed_mean": 17.683208083649074,
+      "speed_std": 13.789574889890659
+    },
+    "PUBLIC_TRANSPORT": {
+      "sequences": 10012,
+      "duration_mean": 27.738007724064456,
+      "duration_std": 18.14323497976565,
+      "total_distance_mean": 8.677827269745043,
+      "total_distance_std": 10.61926563352293,
+      "bird_distance_mean": 6.155500054993207,
+      "bird_distance_std": 8.085225552183172,
+      "speed_mean": 10.204746059927706,
+      "speed_std": 10.14768087852677
+    },
+    "WALKING": {
+      "sequences": 20135,
+      "duration_mean": 12.063799354358084,
+      "duration_std": 11.49246512412709,
+      "total_distance_mean": 1.377298725010637,
+      "total_distance_std": 1.9647050614314636,
+      "bird_distance_mean": 0.6753231624291426,
+      "bird_distance_std": 1.0648207534659146,
+      "speed_mean": 3.206525966289923,
+      "speed_std": 2.1123778506246853
+    }
+  },
+  "n_generated": 71666
+}

@@ -285,6 +285,11 @@ Netmob25MobilityModel::GenerateMLTrajectory (void)
           
           for (const auto& point : points)
             {
+              // Using MinMaxScaler inverse transform: X_original = X_scaled / scale_ + data_min_
+              // data_min_: [48.21542829, 1.45682758, 0.0]
+              // data_max_: [49.23826103, 3.50128242, 120.42]
+              // double lat = point[0] / 0.97767695 + 48.21542829;  // unscale latitude
+              // double lon = point[1] / 0.48912795 + 1.45682758;   // unscale longitude
               // Unscale the model outputs (model outputs are normalized)
               // Original data: lat ~ N(48.725, 0.515), lon ~ N(2.5, 1.05)
               double lat = point[0] * 0.515 + 48.725;  // unscale latitude

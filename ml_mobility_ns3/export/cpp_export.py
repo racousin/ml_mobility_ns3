@@ -232,6 +232,7 @@ class CppExporter:
             'netmob25-mobility-model.h.jinja',
             'netmob25-mobility-model.cc.jinja', 
             'netmob25-mobility-example.cc.jinja',
+            'netmob25-mobility-example-v2.cc.jinja',
             'CMakeLists.txt.jinja'
         ]
         

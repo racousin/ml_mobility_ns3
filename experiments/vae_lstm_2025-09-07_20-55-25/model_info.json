@@ -1,0 +1,48 @@
+{
+  "experiment_id": "vae_lstm_2025-09-07_20-55-25",
+  "model_type": "vae_lstm",
+  "model_class": "ConditionalTrajectoryVAE",
+  "created_at": "2025-09-07T20:55:25.549440",
+  "status": "training",
+  "architecture": {
+    "_target_": "ml_mobility_ns3.models.vae_lstm.ConditionalTrajectoryVAE",
+    "name": "vae_lstm",
+    "input_dim": 3,
+    "hidden_dim": 128,
+    "latent_dim": 16,
+    "num_layers": 2,
+    "condition_dim": 32,
+    "dropout": 0.1
+  },
+  "training_config": {
+    "batch_size": 256,
+    "epochs": 20000,
+    "learning_rate": 0.0001,
+    "val_split": 0.1,
+    "gradient_clip": null,
+    "early_stopping_enabled": false,
+    "lr_scheduler_enabled": false,
+    "best_metric_monitor": "val_loss",
+    "pretrained_checkpoint": "experiments/vae_lstm_2025-09-06_19-32-02/checkpoints/last.ckpt",
+    "loss": {
+      "type": "simple_vae",
+      "params": {
+        "beta": {
+          "type": "adaptive_slow_annealing",
+          "params": {
+            "initial_beta": 0.24,
+            "target_beta": 1,
+            "beta_increment": 0.05,
+            "patience_epochs": 50,
+            "improvement_threshold": 1e-05
+          }
+        },
+        "free_bits": {
+          "enabled": false,
+          "lambda_free_bits": 2.0
+        }
+      }
+    }
+  },
+  "hydra_config": null
+}

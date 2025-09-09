@@ -1,0 +1,15 @@
+{
+  "epoch": 0,
+  "step": 0,
+  "monitored_metric": "val_loss",
+  "best_monitor_value": 2.5386404991149902,
+  "val_loss": 2.5386404991149902,
+  "val_recon_loss": 1.5761198997497559,
+  "val_mse": 0.0052537331357598305,
+  "val_speed_mae": 8.76034164428711,
+  "val_distance_mae": 7.423999786376953,
+  "val_total_distance_mae": 7.348611831665039,
+  "val_bird_distance_mae": 4.261679172515869,
+  "val_kl_loss": 4.010501861572266,
+  "val_weighted_kl_loss": 0.9625204801559448
+}

@@ -99,6 +99,7 @@ This creates `cpp_ns3_export/optimal_medium_v2/` containing:
 - `netmob25-mobility-model.h` - NS-3 mobility model header with integrated LibTorch support
 - `netmob25-mobility-model.cc` - NS-3 mobility model implementation with ML generation
 - `netmob25-mobility-example.cc` - Complete simulation example
+- `netmob25-mobility-example-v2.cc` - LTE network example with automatic base station placement
 - `CMakeLists.txt` - CMake configuration for NS-3 mobility module with LibTorch support
 - `model.pt` - TorchScript model for inference
 - `metadata.json` - Model metadata
@@ -109,6 +110,7 @@ This creates `cpp_ns3_export/optimal_medium_v2/` containing:
 cd cpp_ns3_export/optimal_medium_v2
 cp netmob25-mobility-model.* ../../ns-3.45/src/mobility/model/
 cp netmob25-mobility-example.cc ../../ns-3.45/scratch/
+cp netmob25-mobility-example-v2.cc ../../ns-3.45/scratch/
 cp model.pt ../../ns-3.45/
 cp CMakeLists.txt ../../ns-3.45/src/mobility/
 
@@ -120,4 +122,9 @@ CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 build
 
 # 4. Run the example with ML trajectory generation
 ./ns3 run "scratch/netmob25-mobility-example --nNodes=1 --simTime=10"
+
+# 5. Run the LTE network example with base station placement
+# This example captures the min/max x,y positions from user trajectories
+# and places an eNodeB (base station) at the center of the mobility area
+./ns3 run "scratch/netmob25-mobility-example-v2 --nNodes=3 --simTime=10"
 ```
