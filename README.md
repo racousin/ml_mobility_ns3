@@ -11,7 +11,7 @@ poetry install
 ## Part 1: Preprocess, Train, Evaluate Trajectory Generation
 
 ### Data Preprocessing
-
+# first dowload and unzip the netmob25 into data/netmob25
 ```bash
 poetry run python scripts/preprocess.py data.data_dir=data/netmob25
 ```
