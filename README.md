@@ -121,10 +121,10 @@ CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 configure --enable-examples
 CMAKE_PREFIX_PATH=$TORCH_ROOT ./ns3 build
 
 # 4. Run the example with ML trajectory generation
-./ns3 run "scratch/netmob25-mobility-example --nNodes=1 --simTime=10"
+./ns3 run "scratch/netmob25-mobility-example --nNodes=1 --simTime=100"
 
 # 5. Run the LTE network example with base station placement
 # This example captures the min/max x,y positions from user trajectories
 # and places an eNodeB (base station) at the center of the mobility area
-./ns3 run "scratch/netmob25-mobility-example-v2 --nNodes=3 --simTime=10"
+./ns3 run "scratch/netmob25-mobility-example-v2 --nNodes=3 --simTime=100"
 ```
