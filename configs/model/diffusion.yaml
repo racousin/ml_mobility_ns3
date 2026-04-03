@@ -1,0 +1,9 @@
+_target_: ml_mobility_ns3.models.diffusion.TrajectoryDiffusionModel
+name: diffusion
+input_dim: 3
+base_channels: 64
+condition_dim: 32
+timesteps: 1000
+schedule_type: cosine
+num_transport_modes: 5
+sequence_length: 2000

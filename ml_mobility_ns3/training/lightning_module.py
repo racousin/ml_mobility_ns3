@@ -6,9 +6,11 @@ from typing import Dict, Any, Tuple
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 import logging
+from pathlib import Path
 
 from ml_mobility_ns3.metrics.diff_metrics import DiffMetrics
 from .losses import create_loss, BaseLoss
+import ml_mobility_ns3.models.diffusion
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,7 @@ class TrajectoryLightningModule(pl.LightningModule):
             logger.info("Skipping loss initialization (evaluation mode)")
         
         # Initialize metrics
-        self.metrics = DiffMetrics()
+        self.metrics = DiffMetrics(scaler_path=Path(self.config.data.output_dir) / 'scalers.pkl')
         
         # For validation epoch aggregation
         self._validation_outputs = []
@@ -107,9 +109,16 @@ class TrajectoryLightningModule(pl.LightningModule):
     
     def _init_loss(self):
         """Initialize loss function from config."""
-        loss_config = self.config.training.loss
-        self.loss_fn = create_loss(OmegaConf.to_container(loss_config))
-        logger.info(f"Using loss function: {loss_config.type}")
+        loss_config = OmegaConf.to_container(self.config.training.loss)
+        
+        # Override loss type for diffusion models if not already set correctly
+        if (isinstance(self.model, ml_mobility_ns3.models.diffusion.TrajectoryDiffusionModel) and 
+            loss_config.get('type') != 'diffusion'):
+            logger.info("Detected Diffusion model, overriding loss type to 'diffusion'")
+            loss_config['type'] = 'diffusion'
+            
+        self.loss_fn = create_loss(loss_config)
+        logger.info(f"Using loss function: {loss_config['type']}")
         
         # Log beta scheduling info if applicable
         loss_params = loss_config.get('params', {})
@@ -160,8 +169,19 @@ class TrajectoryLightningModule(pl.LightningModule):
     
     def _compute_metrics(self, outputs: Dict, batch: Tuple) -> Dict[str, torch.Tensor]:
         """Compute standardized metrics."""
-        x, mask, _, _ = self._prepare_batch(batch)
-        return self.metrics.compute_comprehensive_metrics(outputs['recon'], x, mask)
+        x, mask, transport_mode, length = self._prepare_batch(batch)
+        
+        # If output doesn't naturally have 'recon' (like diffusion), sample it specifically for metrics
+        if 'recon' in outputs and not isinstance(self.model, ml_mobility_ns3.models.diffusion.TrajectoryDiffusionModel):
+            recon = outputs['recon']
+        else:
+            # For diffusion, generate samples using the reverse process for metric evaluation
+            # Only do this sparingly as it is slow
+            conditions = {'transport_mode': transport_mode, 'length': length}
+            # Just generate a few to save time during validation, but match batch size for simplicity in metrics
+            recon = self.model.generate(conditions, n_samples=x.shape[0], target_length=x.shape[1])
+            
+        return self.metrics.compute_comprehensive_metrics(recon, x, mask)
     
     def _log_metrics(self, loss: torch.Tensor, loss_components: Dict, 
                     metrics: Dict, prefix: str = 'train'):
@@ -192,8 +212,10 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Compute loss
         loss, loss_components = self._compute_loss(outputs, batch)
         
-        # Compute metrics
-        metrics = self._compute_metrics(outputs, batch)
+        # Compute metrics (only if not Diffusion or if specifically requested)
+        metrics = {}
+        if not isinstance(self.model, ml_mobility_ns3.models.diffusion.TrajectoryDiffusionModel):
+            metrics = self._compute_metrics(outputs, batch)
         
         # Log everything
         self._log_metrics(loss, loss_components, metrics, prefix='train')
@@ -218,8 +240,11 @@ class TrajectoryLightningModule(pl.LightningModule):
         # Compute loss
         loss, loss_components = self._compute_loss(outputs, batch)
         
-        # Compute metrics
-        metrics = self._compute_metrics(outputs, batch)
+        # Compute metrics (for validation, we might want to do it but maybe not every step for Diffusion)
+        metrics = {}
+        # For Diffusion, only compute metrics occasionally or on first batch of validation to save time
+        if not isinstance(self.model, ml_mobility_ns3.models.diffusion.TrajectoryDiffusionModel) or batch_idx == 0:
+            metrics = self._compute_metrics(outputs, batch)
         
         # Log everything
         self._log_metrics(loss, loss_components, metrics, prefix='val')

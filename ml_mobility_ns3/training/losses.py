@@ -340,12 +340,81 @@ class SimpleVAELoss(BaseLoss):
 
 
 
+
+class VQVAELoss(BaseLoss):
+    """Loss for Vector Quantized VAE."""
+    
+    def __init__(self, recon_weight: float = 300.0, **kwargs):
+        super().__init__()
+        self.recon_weight = recon_weight
+        
+    def __call__(self, outputs: Dict[str, torch.Tensor], 
+                 targets: Dict[str, torch.Tensor], 
+                 mask: torch.Tensor) -> Dict[str, torch.Tensor]:
+        
+        recon = outputs['recon']
+        vq_loss = outputs['vq_loss']
+        perplexity = outputs['perplexity']
+        x = targets['x']
+        
+        # Reconstruction loss (MSE) on valid entries
+        mask_expanded = mask.unsqueeze(-1).expand_as(x)
+        valid_positions = mask_expanded.bool()
+        
+        valid_recon = recon[valid_positions]
+        valid_x = x[valid_positions]
+        
+        recon_loss = F.mse_loss(valid_recon, valid_x) * self.recon_weight
+        
+        total = recon_loss + vq_loss
+        
+        return {
+            'total': total,
+            'recon_loss': recon_loss,
+            'vq_loss': vq_loss,
+            'perplexity': perplexity
+        }
+
+
+class DiffusionLoss(BaseLoss):
+    """Loss for Diffusion Models."""
+    def __init__(self, **kwargs):
+        super().__init__()
+        
+    def __call__(self, outputs: Dict[str, torch.Tensor], 
+                 targets: Dict[str, torch.Tensor], 
+                 mask: torch.Tensor) -> Dict[str, torch.Tensor]:
+        
+        predicted_noise = outputs['predicted_noise']
+        target_noise = outputs['target_noise']
+        
+        # Ensure predicted and target noise match input shape before masking
+        # both are (batch, input_dim, seq_len) -> (batch, seq_len, input_dim)
+        predicted_noise = predicted_noise.transpose(1, 2)
+        target_noise = target_noise.transpose(1, 2)
+        
+        x = targets['x']
+        mask_expanded = mask.unsqueeze(-1).expand_as(x)
+        valid_positions = mask_expanded.bool()
+        
+        valid_pred = predicted_noise[valid_positions]
+        valid_target = target_noise[valid_positions]
+        
+        loss = F.mse_loss(valid_pred, valid_target)
+        
+        return {
+            'total': loss,
+            'noise_mse': loss
+        }
+
 # Loss factory
 from ml_mobility_ns3.training.distance_aware_loss import DistanceVAELoss
 
 LOSS_REGISTRY = {
     'simple_vae': SimpleVAELoss,
     'distance_vae': DistanceVAELoss,
+    'vq_vae': VQVAELoss,
+    'diffusion': DiffusionLoss,
 }
 
 

@@ -13,13 +13,13 @@ poetry install
 ### Data Preprocessing
 # first dowload and unzip the netmob25 into data/netmob25
 ```bash
-poetry run python scripts/preprocess.py data.data_dir=data/netmob25
+poetry run python scripts/preprocess.py data.data_dir=/root/data_quannguyen/data/netmob25
 ```
 
 ### Training
 
 ```bash
-poetry run python scripts/train.py model=vae_lstm training.epochs=100
+poetry run python scripts/train.py model=diffusion training.epochs=100
 ```
 
 ### List Experiments

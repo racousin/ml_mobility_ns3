@@ -1,6 +1,6 @@
 name: netmob25
-data_dir: data/netmob25
-output_dir: data/processed
+data_dir: /root/data_quannguyen/data/netmob25
+output_dir: /root/data_quannguyen/data/processed
 sequence_length: 2000
 idf_bounds:
   lat_min: 48.21

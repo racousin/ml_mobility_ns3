@@ -1,0 +1,12 @@
+_target_: ml_mobility_ns3.models.vq_vae.ConditionalTrajectoryVQVAE
+name: vq_vae
+input_dim: 3
+base_channels: 64
+num_embeddings: 512
+embedding_dim: 64
+condition_dim: 32
+commitment_cost: 0.25
+dropout: 0.1
+num_transport_modes: 5
+sequence_length: 2000
+use_batch_norm: true

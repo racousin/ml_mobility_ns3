@@ -1,12 +1,12 @@
 defaults:
   - data: netmob25
-  - model: vae_lstm
+  - model: diffusion
   - training: default
   - export: cpp
   - _self_
 
 accelerator: gpu
-devices: [1] 
+devices: [0] 
 
 hydra:
   run:
