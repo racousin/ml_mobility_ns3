@@ -3,7 +3,7 @@ name: diffusion
 input_dim: 3
 base_channels: 64
 condition_dim: 32
-timesteps: 1000
+timesteps: 50  # old : 10000
 schedule_type: cosine
 num_transport_modes: 5
 sequence_length: 2000

@@ -1,0 +1,32 @@
+batch_size: 32
+epochs: 3000
+learning_rate: 0.001
+val_split: 0.1
+gradient_clip: 1.0
+
+# Thiết lập patience cực cao để Early Stopping không ngắt ngang 
+# trong lúc đang chờ ~500 epochs theo yêu cầu của cô Trang
+early_stopping_patience: 1500
+early_stopping_monitor: val_recon_loss
+
+lr_scheduler_patience: 50
+lr_scheduler_factor: 0.5
+lr_scheduler_monitor: val_recon_loss
+
+best_metric_monitor: val_loss
+pretrained_checkpoint: null
+
+loss:
+  type: simple_vae
+  params:
+    beta:
+      type: adaptive_slow_annealing
+      params:
+        initial_beta: 0.0         
+        target_beta: 0.5           
+        beta_increment: 0.01       
+        patience_epochs: 500       
+        improvement_threshold: 0.0001
+    free_bits:
+      enabled: false
+      lambda_free_bits: 2.0

@@ -393,14 +393,24 @@ class DiffusionLoss(BaseLoss):
         predicted_noise = predicted_noise.transpose(1, 2)
         target_noise = target_noise.transpose(1, 2)
         
+       # x = targets['x']
+       # mask_expanded = mask.unsqueeze(-1).expand_as(x)
+       # valid_positions = mask_expanded.bool()
+        
+        #valid_pred = predicted_noise[valid_positions]
+        #valid_target = target_noise[valid_positions]
+        
+        #loss = F.mse_loss(valid_pred, valid_target)
+
+
         x = targets['x']
         mask_expanded = mask.unsqueeze(-1).expand_as(x)
-        valid_positions = mask_expanded.bool()
         
-        valid_pred = predicted_noise[valid_positions]
-        valid_target = target_noise[valid_positions]
+        # Plan A : Get targetNoise to 0 in invalid positions
+        target_noise_masked = target_noise * mask_expanded
         
-        loss = F.mse_loss(valid_pred, valid_target)
+       
+        loss = F.mse_loss(predicted_noise, target_noise_masked)
         
         return {
             'total': loss,
