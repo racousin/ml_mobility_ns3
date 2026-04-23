@@ -1,0 +1,12 @@
+defaults:
+  - default
+
+loss:
+  type: simple_vae
+  params:
+    beta:
+      type: constant
+      params:
+        value: 0.0
+    free_bits:
+      enabled: false
