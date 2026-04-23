@@ -54,32 +54,52 @@ class DenoisingUNet1D(nn.Module):
             nn.Linear(time_dim, time_dim),
         )
         
+        self.cond_to_time = nn.Sequential(
+            nn.Linear(condition_dim * 2, time_dim),
+            nn.GELU(),
+            nn.Linear(time_dim, time_dim)
+        )
+        
         # Initial projection
-        # We need to process conditionals as well, so we project them and add them
         self.init_conv = nn.Conv1d(input_dim, base_channels, kernel_size=7, padding=3)
-        self.cond_proj = nn.Linear(condition_dim * 2, base_channels)
         
         # Downsampling blocks
         self.down1 = ConvBlock(base_channels, base_channels * 2, kernel_size=4, stride=2, padding=1, use_bn=use_bn)
         self.down2 = ConvBlock(base_channels * 2, base_channels * 4, kernel_size=4, stride=2, padding=1, use_bn=use_bn)
+        self.down3 = ConvBlock(base_channels * 4, base_channels * 8, kernel_size=4, stride=2, padding=1, use_bn=use_bn)
+        self.down4 = ConvBlock(base_channels * 8, base_channels * 8, kernel_size=4, stride=2, padding=1, use_bn=use_bn)
         
-        # Middle block
-        self.mid1 = ConvBlock(base_channels * 4, base_channels * 4, kernel_size=3, padding=1, use_bn=use_bn, use_residual=True)
-        self.mid2 = ConvBlock(base_channels * 4, base_channels * 4, kernel_size=3, padding=1, use_bn=use_bn, use_residual=True)
+        # Middle blocks
+        self.mid1 = ConvBlock(base_channels * 8, base_channels * 8, kernel_size=3, padding=1, use_bn=use_bn, use_residual=True)
+        # 1D Self-Attention using PyTorch MultiheadAttention
+        self.attn = nn.MultiheadAttention(embed_dim=base_channels * 8, num_heads=4, batch_first=True)
+        self.mid2 = ConvBlock(base_channels * 8, base_channels * 8, kernel_size=3, padding=1, use_bn=use_bn, use_residual=True)
         
         # Upsampling blocks (using ConvTranspose1d)
-        self.up1 = nn.ConvTranspose1d(base_channels * 4, base_channels * 2, kernel_size=4, stride=2, padding=1)
-        self.up1_conv = ConvBlock(base_channels * 4, base_channels * 2, kernel_size=3, padding=1, use_bn=use_bn)
+        self.up1 = nn.ConvTranspose1d(base_channels * 8, base_channels * 8, kernel_size=4, stride=2, padding=1)
+        self.up1_conv = ConvBlock(base_channels * 16, base_channels * 8, kernel_size=3, padding=1, use_bn=use_bn)
         
-        self.up2 = nn.ConvTranspose1d(base_channels * 2, base_channels, kernel_size=4, stride=2, padding=1)
-        self.up2_conv = ConvBlock(base_channels * 2, base_channels, kernel_size=3, padding=1, use_bn=use_bn)
+        self.up2 = nn.ConvTranspose1d(base_channels * 8, base_channels * 4, kernel_size=4, stride=2, padding=1)
+        self.up2_conv = ConvBlock(base_channels * 8, base_channels * 4, kernel_size=3, padding=1, use_bn=use_bn)
+        
+        self.up3 = nn.ConvTranspose1d(base_channels * 4, base_channels * 2, kernel_size=4, stride=2, padding=1)
+        self.up3_conv = ConvBlock(base_channels * 4, base_channels * 2, kernel_size=3, padding=1, use_bn=use_bn)
+        
+        self.up4 = nn.ConvTranspose1d(base_channels * 2, base_channels, kernel_size=4, stride=2, padding=1)
+        self.up4_conv = ConvBlock(base_channels * 2, base_channels, kernel_size=3, padding=1, use_bn=use_bn)
         
         # Time embeddings projections
         self.time_emb_down1 = nn.Linear(time_dim, base_channels * 2)
         self.time_emb_down2 = nn.Linear(time_dim, base_channels * 4)
-        self.time_emb_mid = nn.Linear(time_dim, base_channels * 4)
-        self.time_emb_up1 = nn.Linear(time_dim, base_channels * 2)
-        self.time_emb_up2 = nn.Linear(time_dim, base_channels)
+        self.time_emb_down3 = nn.Linear(time_dim, base_channels * 8)
+        self.time_emb_down4 = nn.Linear(time_dim, base_channels * 8)
+        
+        self.time_emb_mid = nn.Linear(time_dim, base_channels * 8)
+        
+        self.time_emb_up1 = nn.Linear(time_dim, base_channels * 8)
+        self.time_emb_up2 = nn.Linear(time_dim, base_channels * 4)
+        self.time_emb_up3 = nn.Linear(time_dim, base_channels * 2)
+        self.time_emb_up4 = nn.Linear(time_dim, base_channels)
         
         # Final block
         self.final_conv = nn.Conv1d(base_channels, input_dim, kernel_size=1)
@@ -89,55 +109,70 @@ class DenoisingUNet1D(nn.Module):
         # cond: (batch, cond_dim*2)
         
         t = self.time_mlp(time)
-        
-        # Prepare condition embedding for full sequence
-        c = self.cond_proj(cond) # (batch, base_channels)
-        c = c.unsqueeze(-1) # (batch, base_channels, 1)
+        c = self.cond_to_time(cond)
+        t = t + c  # Inject conditions at the time embedding level
         
         # Initial projection
-        x_init = self.init_conv(x) + c
+        x_init = self.init_conv(x)
         
-        # Down 1
+        # Down
         h1 = self.down1(x_init)
-        t_down1 = self.time_emb_down1(t).unsqueeze(-1)
-        h1 = h1 + t_down1
+        h1 = h1 + self.time_emb_down1(t).unsqueeze(-1)
         
-        # Down 2
         h2 = self.down2(h1)
-        t_down2 = self.time_emb_down2(t).unsqueeze(-1)
-        h2 = h2 + t_down2
+        h2 = h2 + self.time_emb_down2(t).unsqueeze(-1)
+        
+        h3 = self.down3(h2)
+        h3 = h3 + self.time_emb_down3(t).unsqueeze(-1)
+        
+        h4 = self.down4(h3)
+        h4 = h4 + self.time_emb_down4(t).unsqueeze(-1)
         
         # Middle
-        h_mid = self.mid1(h2)
-        t_mid = self.time_emb_mid(t).unsqueeze(-1)
-        h_mid = h_mid + t_mid
+        h_mid = self.mid1(h4)
+        h_mid = h_mid + self.time_emb_mid(t).unsqueeze(-1)
+        
+        # Attention
+        h_mid_t = h_mid.transpose(1, 2)  # (batch, seq, channels)
+        attn_out, _ = self.attn(h_mid_t, h_mid_t, h_mid_t)
+        h_mid = attn_out.transpose(1, 2) + h_mid
+        
         h_mid = self.mid2(h_mid)
         
         # Up 1
         h_up1 = self.up1(h_mid)
-        
-        # Match lengths if necessary (due to padding/stride effects for odd lengths)
-        if h_up1.size(2) != h1.size(2):
-            h_up1 = F.interpolate(h_up1, size=h1.size(2), mode='nearest')
-            
-        h_up1 = torch.cat([h_up1, h1], dim=1) # skip connection
+        if h_up1.size(2) != h3.size(2):
+            h_up1 = F.interpolate(h_up1, size=h3.size(2), mode='nearest')
+        h_up1 = torch.cat([h_up1, h3], dim=1) # skip connection
         h_up1 = self.up1_conv(h_up1)
-        t_up1 = self.time_emb_up1(t).unsqueeze(-1)
-        h_up1 = h_up1 + t_up1
+        h_up1 = h_up1 + self.time_emb_up1(t).unsqueeze(-1)
         
         # Up 2
         h_up2 = self.up2(h_up1)
-        
-        if h_up2.size(2) != x_init.size(2):
-            h_up2 = F.interpolate(h_up2, size=x_init.size(2), mode='nearest')
-            
-        h_up2 = torch.cat([h_up2, x_init], dim=1) # skip connection
+        if h_up2.size(2) != h2.size(2):
+            h_up2 = F.interpolate(h_up2, size=h2.size(2), mode='nearest')
+        h_up2 = torch.cat([h_up2, h2], dim=1) # skip connection
         h_up2 = self.up2_conv(h_up2)
-        t_up2 = self.time_emb_up2(t).unsqueeze(-1)
-        h_up2 = h_up2 + t_up2
+        h_up2 = h_up2 + self.time_emb_up2(t).unsqueeze(-1)
+        
+        # Up 3
+        h_up3 = self.up3(h_up2)
+        if h_up3.size(2) != h1.size(2):
+            h_up3 = F.interpolate(h_up3, size=h1.size(2), mode='nearest')
+        h_up3 = torch.cat([h_up3, h1], dim=1) # skip connection
+        h_up3 = self.up3_conv(h_up3)
+        h_up3 = h_up3 + self.time_emb_up3(t).unsqueeze(-1)
+        
+        # Up 4
+        h_up4 = self.up4(h_up3)
+        if h_up4.size(2) != x_init.size(2):
+            h_up4 = F.interpolate(h_up4, size=x_init.size(2), mode='nearest')
+        h_up4 = torch.cat([h_up4, x_init], dim=1) # skip connection
+        h_up4 = self.up4_conv(h_up4)
+        h_up4 = h_up4 + self.time_emb_up4(t).unsqueeze(-1)
         
         # Final projection
-        return self.final_conv(h_up2)
+        return self.final_conv(h_up4)
 
 
 class TrajectoryDiffusionModel(BaseTrajectoryModel):
@@ -290,4 +325,12 @@ class TrajectoryDiffusionModel(BaseTrajectoryModel):
             x = self.p_sample(x, t, i, cond)
             
         # Back to (batch, seq_len, input_dim)
-        return x.transpose(1, 2)
+        out = x.transpose(1, 2)
+        
+        # Truncate/zero-out padding based on valid length
+        for b in range(n_samples):
+            valid_len = int(length[b].item())
+            if valid_len < target_len:
+                out[b, valid_len:, :] = 0.0
+                
+        return out

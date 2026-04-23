@@ -190,6 +190,33 @@ class AdaptiveSlowAnnealingBeta(BetaScheduler):
         }
 
 
+class WaitAndStepBetaScheduler(BetaScheduler):
+    """
+    Beta scheduler that waits for a fixed number of epochs at initial_beta,
+    then steps by beta_increment every step_epochs until target_beta.
+    """
+    
+    def __init__(self, 
+                 initial_beta: float = 0.0,
+                 target_beta: float = 0.5,
+                 beta_increment: float = 0.01,
+                 wait_epochs: int = 500,
+                 step_epochs: int = 10):
+        self.initial_beta = initial_beta
+        self.target_beta = target_beta
+        self.beta_increment = beta_increment
+        self.wait_epochs = wait_epochs
+        self.step_epochs = step_epochs
+        
+    def get_beta(self, step: int, epoch: int) -> float:
+        if epoch < self.wait_epochs:
+            return self.initial_beta
+        else:
+            steps_after_wait = (epoch - self.wait_epochs) // self.step_epochs
+            beta = self.initial_beta + steps_after_wait * self.beta_increment
+            return min(self.target_beta, beta)
+
+
 def create_beta_scheduler(config: Dict[str, Any]) -> BetaScheduler:
     """Create beta scheduler from config."""
     scheduler_type = config.get('type', 'constant')
@@ -205,6 +232,8 @@ def create_beta_scheduler(config: Dict[str, Any]) -> BetaScheduler:
         return CyclicalBeta(**params)
     elif scheduler_type == 'adaptive_slow_annealing':
         return AdaptiveSlowAnnealingBeta(**params)
+    elif scheduler_type == 'wait_and_step':
+        return WaitAndStepBetaScheduler(**params)
     else:
         raise ValueError(f"Unknown beta scheduler type: {scheduler_type}")
 

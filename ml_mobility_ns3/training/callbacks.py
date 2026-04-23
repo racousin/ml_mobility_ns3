@@ -242,7 +242,7 @@ class EarlyStoppingTracker(Callback):
         # Track learning rate changes
         current_lr = trainer.optimizers[0].param_groups[0]['lr']
         if self.last_lr is not None and current_lr != self.last_lr:
-            logger.info(f"Learning Rate Reduced: {self.last_lr:.2e} → {current_lr:.2e}")
+            logger.info(f"Learning Rate Reduced: {self.last_lr:.2e} -> {current_lr:.2e}")
         elif should_log_detailed:
             logger.info(f"Current Learning Rate: {current_lr:.2e}")
         self.last_lr = current_lr

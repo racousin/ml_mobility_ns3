@@ -1,9 +1,9 @@
 _target_: ml_mobility_ns3.models.diffusion.TrajectoryDiffusionModel
 name: diffusion
 input_dim: 3
-base_channels: 64
-condition_dim: 32
-timesteps: 50  # old : 10000
+base_channels: 128
+condition_dim: 64
+timesteps: 200  # 50 is too low for standard DDPM, 1000 is too slow. 200 is a good sweet spot.
 schedule_type: cosine
 num_transport_modes: 5
 sequence_length: 2000

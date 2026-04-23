@@ -28,25 +28,24 @@ class MultiHeadAttention(nn.Module):
                                    mask: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_heads, seq_len, d_k = Q.size()
         
-        # Compute attention scores
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(d_k)
-        
-        # Apply mask if provided
+        # PyTorch 2.0+ optimized attention (Memory Efficient / FlashAttention)
+        attn_mask = None
         if mask is not None:
-            # Expand mask to match attention shape [batch_size, num_heads, seq_len, seq_len]
             if mask.dim() == 2:  # [batch_size, seq_len]
-                mask = mask.unsqueeze(1).unsqueeze(1)  # [batch_size, 1, 1, seq_len]
-                mask = mask.expand(-1, num_heads, seq_len, -1)
-            scores.masked_fill_(mask == 0, -1e9)
+                # F.scaled_dot_product_attention expects [batch_size, 1, 1, seq_len] for boolean broadcasting
+                attn_mask = mask.unsqueeze(1).unsqueeze(2)
+            # Convert to boolean mask where True means "participate in attention"
+            attn_mask = attn_mask.bool()
+            
+        output = F.scaled_dot_product_attention(
+            Q, K, V,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout.p if self.training else 0.0,
+            is_causal=False
+        )
         
-        # Apply softmax
-        attention_weights = F.softmax(scores, dim=-1)
-        attention_weights = self.dropout(attention_weights)
-        
-        # Apply attention to values
-        output = torch.matmul(attention_weights, V)
-        
-        return output, attention_weights
+        # FlashAttention avoids materializing the NxN attention weights to save memory.
+        return output, None
     
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         batch_size, seq_len, d_model = x.size()

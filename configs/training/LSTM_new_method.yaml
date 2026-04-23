@@ -20,13 +20,13 @@ loss:
   type: simple_vae
   params:
     beta:
-      type: adaptive_slow_annealing
+      type: wait_and_step
       params:
         initial_beta: 0.0         
         target_beta: 0.5           
         beta_increment: 0.01       
-        patience_epochs: 500       
-        improvement_threshold: 0.0001
+        wait_epochs: 500
+        step_epochs: 10
     free_bits:
       enabled: false
       lambda_free_bits: 2.0

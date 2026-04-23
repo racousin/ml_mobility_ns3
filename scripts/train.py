@@ -115,20 +115,21 @@ class TrainingPipeline:
         train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
         
         # Create dataloaders
+        # Set num_workers to 0 to completely prevent RAM/Pagefile overflow on Windows
         train_loader = DataLoader(
             train_dataset, 
             batch_size=self.cfg.training.batch_size,
             shuffle=True,
-            num_workers=9,
-            pin_memory=False
+            num_workers=0,
+            pin_memory=True
         )
         
         val_loader = DataLoader(
             val_dataset,
             batch_size=self.cfg.training.batch_size,
             shuffle=False,
-            num_workers=9,
-            pin_memory=False
+            num_workers=0,
+            pin_memory=True
         )
         
         return train_loader, val_loader

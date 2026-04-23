@@ -197,7 +197,7 @@ def list_experiments():
                 valid_exps.sort(key=lambda x: x[1])
                 
                 unit_str = f" {unit}" if unit else ""
-                print(f"\n📈 Best by {metric_name}:")
+                print(f"\n[Best] by {metric_name}:")
                 for i, (exp_data, value) in enumerate(valid_exps[:3], 1):
                     exp_id = exp_data['id']
                     if len(exp_id) > 35:
@@ -210,7 +210,7 @@ def list_experiments():
         # Summary of completed experiments
         completed_exps = [exp for exp in all_metrics_data]
         if completed_exps:
-            print(f"\n📊 Summary:")
+            print(f"\n[Summary]:")
             print(f"   • Completed experiments: {len(completed_exps)}")
             
             # Group by model type

@@ -5,15 +5,18 @@ Trajectory generation models for mobility simulation.
 ## Installation
 
 ```bash
+conda create -n ml_mobility python=3.10
+conda activate ml_mobility
+conda install poetry
 poetry install
 ```
 
 ## Part 1: Preprocess, Train, Evaluate Trajectory Generation
 
 ### Data Preprocessing
-# first dowload and unzip the netmob25 into data/netmob25
+# Ensure your data is placed in the `data/data` directory.
 ```bash
-poetry run python scripts/preprocess.py data.data_dir=/root/data_quannguyen/data/netmob25
+poetry run python scripts/preprocess.py data.data_dir=./data/data
 ```
 
 ### Training

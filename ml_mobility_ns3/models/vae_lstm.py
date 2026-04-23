@@ -89,6 +89,13 @@ class ConditionalTrajectoryVAE(BaseTrajectoryModel):
         
         mu = self.fc_mu(h_conditioned)
         logvar = self.fc_logvar(h_conditioned)
+        
+        # FIX: Khóa chặt giá trị mu và logvar trong khoảng an toàn.
+        # Khi beta=0 (500 epoch đầu), model sẽ cố tình đẩy mu ra vô cực để tối ưu loss,
+        # gây ra lỗi NaN. Việc clamp này sẽ chặn đứng lỗi đó mà không ảnh hưởng tới chất lượng.
+        mu = torch.clamp(mu, min=-100.0, max=100.0)
+        logvar = torch.clamp(logvar, min=-20.0, max=10.0)
+        
         return mu, logvar
     
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:

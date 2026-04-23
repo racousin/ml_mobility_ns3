@@ -13,6 +13,7 @@ import pickle
 import folium
 from typing import List, Dict
 import sys
+import argparse
 
 # Add project to path
 sys.path.append('.')
@@ -29,45 +30,50 @@ def get_device():
     else:
         return 'cpu'
 
+from ml_mobility_ns3.utils.experiment_utils import ExperimentManager
+from ml_mobility_ns3.utils.model_utils import load_checkpoint, merge_configs
+from ml_mobility_ns3.training.lightning_module import TrajectoryLightningModule
+from hydra import compose, initialize
+from omegaconf import OmegaConf
+
 def load_model_from_experiment(experiment_path: Path, device: str = None):
-    """Load model from Lightning experiment checkpoint."""
+    """Load model from Lightning experiment checkpoint dynamically."""
     if device is None:
         device = get_device()
     
-    # Load model info
+    exp_manager = ExperimentManager()
+    
+    # Load model info to return later
     with open(experiment_path / 'model_info.json', 'r') as f:
         model_info = json.load(f)
+        
+    _, exp_config = exp_manager.load_experiment_info(experiment_path)
     
-    # Extract model architecture config
-    arch_config = model_info['architecture']
-    
-    # Create model instance
-    model = ConditionalTrajectoryVAE(
-        input_dim=arch_config['input_dim'],
-        hidden_dim=arch_config['hidden_dim'],
-        latent_dim=arch_config['latent_dim'],
-        num_layers=arch_config['num_layers'],
-        condition_dim=arch_config['condition_dim'],
-        dropout=arch_config['dropout']
+    # Load base config
+    try:
+        with initialize(version_base=None, config_path="configs"):
+            cfg = compose(config_name="config")
+    except Exception:
+        cfg = OmegaConf.create()
+        
+    # Merge configs
+    if exp_config:
+        cfg = merge_configs(cfg, exp_config)
+        
+    checkpoint_path = exp_manager.find_best_checkpoint(experiment_path / "checkpoints")
+    if checkpoint_path is None:
+        raise FileNotFoundError(f"No valid checkpoints found in {experiment_path}")
+        
+    # Load Lightning Module
+    pl_module = load_checkpoint(
+        checkpoint_path,
+        cfg,
+        TrajectoryLightningModule,
+        device=device
     )
     
-    # Load checkpoint
-    checkpoint_path = experiment_path / 'checkpoints' / 'best_model.ckpt'
-    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
-    
-    # Extract model state dict from Lightning checkpoint
-    model_state_dict = checkpoint['state_dict']
-    
-    # Remove 'model.' prefix from keys (Lightning wrapper adds this)
-    cleaned_state_dict = {}
-    for key, value in model_state_dict.items():
-        if key.startswith('model.'):
-            cleaned_key = key[6:]  # Remove 'model.' prefix
-            cleaned_state_dict[cleaned_key] = value
-    
-    # Load weights
-    model.load_state_dict(cleaned_state_dict)
-    model = model.to(device)
+    # Extract inner model
+    model = pl_module.model
     model.eval()
     
     return model, model_info
@@ -277,17 +283,30 @@ def create_interactive_map(trajectories: List[Dict], output_file: str = "all_gen
 
 def main():
     """Main execution function."""
+    parser = argparse.ArgumentParser(description="Generate trajectories and create an interactive map.")
+    parser.add_argument("--experiment_id", type=str, required=True, help="ID of the experiment in the experiments directory")
+    parser.add_argument("--n_samples", type=int, default=2500, help="Total trajectories to generate")
+    parser.add_argument("--output_file", type=str, default="generated_trajectories.html", help="Output HTML file name")
+    parser.add_argument("--preprocessing_dir", type=str, default="data/processed", help="Path to preprocessing dir")
+    
+    args = parser.parse_args()
+    
     # Set paths
-    experiment_path = Path("experiments/vae_lstm_2025-09-07_20-55-25")
-    preprocessing_dir = Path("data/processed")
-    output_file = "all_generated_trajectories3.html"
+    experiment_path = Path("experiments") / args.experiment_id
+    if not experiment_path.exists():
+        print(f"❌ Error: Experiment path {experiment_path} does not exist.")
+        sys.exit(1)
+        
+    preprocessing_dir = Path(args.preprocessing_dir)
+    output_file = args.output_file
+    n_samples = args.n_samples
     
     # Setup device
     device = get_device()
     print(f"Using device: {device}")
     
     # Load model
-    print("Loading model from experiment...")
+    print(f"Loading model from experiment {args.experiment_id}...")
     model, model_info = load_model_from_experiment(experiment_path, device)
     
     # Load scalers
@@ -295,8 +314,7 @@ def main():
     scalers = load_scalers(preprocessing_dir)
     
     # Generate sample trajectories
-    print("Generating sample trajectories...")
-    n_samples = 2500  # Total trajectories to generate
+    print(f"Generating {n_samples} sample trajectories...")
     normalized_trajectories = generate_sample_trajectories(model, device, n_samples)
     print(f"Generated {len(normalized_trajectories)} normalized trajectories")
     
