@@ -1,0 +1,9 @@
+_target_: ml_mobility_ns3.models.diffusion_gan.TrajectoryDiffusionGAN
+name: diffusion_gan
+input_dim: 3
+base_channels: 128
+condition_dim: 64
+timesteps: 100 # Diffusion-GAN thường hội tụ nhanh hơn với ít bước hơn
+schedule_type: cosine
+num_transport_modes: 5
+sequence_length: 2000

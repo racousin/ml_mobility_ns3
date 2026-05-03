@@ -1,64 +1,87 @@
 #!/bin/bash
 # Script to train all models in 2 batches of 4
+# Each model runs in its own tmux window for easy log monitoring
 # Usage: bash scripts/train_all.sh
+#
+# Windows layout:
+#   0:diffusion  1:dummy  2:gpt  3:vae_attention
+#   4:vae_cnn    5:vae_dense  6:vae_lstm  7:vq_vae
 
 cd /network-volume/ns3/ml_mobility_ns3
+SESSION="tml_ns3"
 
 echo "========================================"
 echo " Batch Training - 4 models at a time"
+echo " Each model in its own tmux window"
 echo " Started at: $(date)"
 echo "========================================"
 
-# --- BATCH 1: 4 smaller/simpler models ---
+# --- BATCH 1: vae_attention, vae_lstm, gpt, vae_dense ---
 echo ""
-echo "========================================"
-echo " BATCH 1: dummy, vae_lstm, vae_dense, vae_cnn"
-echo " Started at: $(date)"
+echo " BATCH 1: vae_attention, vae_lstm, gpt, vae_dense"
 echo "========================================"
 
-python scripts/train.py model=dummy &
-PID1=$!
-python scripts/train.py model=vae_lstm &
-PID2=$!
-python scripts/train.py model=vae_dense &
-PID3=$!
-python scripts/train.py model=vae_cnn &
-PID4=$!
+tmux send-keys -t $SESSION:3 "cd /network-volume/ns3/ml_mobility_ns3 && python scripts/train.py model=vae_attention" Enter
+sleep 2
+tmux send-keys -t $SESSION:6 "cd /network-volume/ns3/ml_mobility_ns3 && python scripts/train.py model=vae_lstm" Enter
+sleep 2
+tmux send-keys -t $SESSION:2 "cd /network-volume/ns3/ml_mobility_ns3 && python scripts/train.py model=gpt training=gpt" Enter
+sleep 2
+tmux send-keys -t $SESSION:5 "cd /network-volume/ns3/ml_mobility_ns3 && python scripts/train.py model=vae_dense" Enter
 
-# Wait for all 4 to finish
-wait $PID1 $PID2 $PID3 $PID4
+echo " All batch 1 models launched. Waiting for completion..."
+
+# Wait for all 4 to finish by checking if python is still running in each window
+while true; do
+    RUNNING=0
+    for win in 3 6 2 5; do
+        PANE_PID=$(tmux list-panes -t $SESSION:$win -F '#{pane_pid}')
+        if pgrep -P "$PANE_PID" python > /dev/null 2>&1; then
+            RUNNING=$((RUNNING + 1))
+        fi
+    done
+    if [ $RUNNING -eq 0 ]; then
+        break
+    fi
+    echo "  [$(date +%H:%M:%S)] $RUNNING model(s) still training..."
+    sleep 60
+done
 
 echo "========================================"
 echo " BATCH 1 DONE at: $(date)"
 echo "========================================"
-
-# Pause to let GPU memory fully release
 sleep 10
 
-# --- BATCH 2: 4 larger/complex models ---
+# --- BATCH 2: dummy, vae_cnn, vq_vae, diffusion ---
 echo ""
-echo "========================================"
-echo " BATCH 2: vae_attention, vq_vae, diffusion, gpt"
-echo " Started at: $(date)"
+echo " BATCH 2: dummy, vae_cnn, vq_vae, diffusion"
 echo "========================================"
 
-python scripts/train.py model=vae_attention &
-PID5=$!
-python scripts/train.py model=vq_vae &
-PID6=$!
-python scripts/train.py model=diffusion training=diffusion &
-PID7=$!
-python scripts/train.py model=gpt &
-PID8=$!
+tmux send-keys -t $SESSION:1 "cd /network-volume/ns3/ml_mobility_ns3 && python scripts/train.py model=dummy" Enter
+sleep 2
+tmux send-keys -t $SESSION:4 "cd /network-volume/ns3/ml_mobility_ns3 && python scripts/train.py model=vae_cnn" Enter
+sleep 2
+tmux send-keys -t $SESSION:7 "cd /network-volume/ns3/ml_mobility_ns3 && python scripts/train.py model=vq_vae" Enter
+sleep 2
+tmux send-keys -t $SESSION:0 "cd /network-volume/ns3/ml_mobility_ns3 && python scripts/train.py model=diffusion training=diffusion" Enter
 
-# Wait for all 4 to finish
-wait $PID5 $PID6 $PID7 $PID8
+echo " All batch 2 models launched. Waiting for completion..."
 
-echo "========================================"
-echo " BATCH 2 DONE at: $(date)"
-echo "========================================"
+while true; do
+    RUNNING=0
+    for win in 1 4 7 0; do
+        PANE_PID=$(tmux list-panes -t $SESSION:$win -F '#{pane_pid}')
+        if pgrep -P "$PANE_PID" python > /dev/null 2>&1; then
+            RUNNING=$((RUNNING + 1))
+        fi
+    done
+    if [ $RUNNING -eq 0 ]; then
+        break
+    fi
+    echo "  [$(date +%H:%M:%S)] $RUNNING model(s) still training..."
+    sleep 60
+done
 
-echo ""
 echo "========================================"
 echo " ALL TRAINING COMPLETED at: $(date)"
 echo "========================================"

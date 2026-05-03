@@ -211,6 +211,13 @@ class TrajectoryDiffusionModel(BaseTrajectoryModel):
         )
         
         return sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
+
+    def predict_x0(self, x_t, t, noise_pred):
+        """Estimate x_0 from x_t and predicted noise."""
+        sqrt_inv_alphas_cumprod_t = self.extract(torch.sqrt(1.0 / (self.sqrt_alphas_cumprod**2)), t, x_t.shape)
+        sqrt_one_minus_alphas_cumprod_inv_t = self.extract(torch.sqrt(1.0 / (self.sqrt_alphas_cumprod**2) - 1.0), t, x_t.shape)
+        
+        return sqrt_inv_alphas_cumprod_t * x_t - sqrt_one_minus_alphas_cumprod_inv_t * noise_pred
         
     def forward(self, x: torch.Tensor, transport_mode: torch.Tensor, 
                 length: torch.Tensor, mask: torch.Tensor = None) -> Dict[str, torch.Tensor]:
@@ -236,14 +243,15 @@ class TrajectoryDiffusionModel(BaseTrajectoryModel):
         # Predict noise using U-Net
         predicted_noise = self.model(x_noisy, t, cond)
         
+        # Estimate x_0 from predicted noise
+        x_0_pred = self.predict_x0(x_noisy, t, predicted_noise)
+        
         return {
-            'predicted_noise': predicted_noise,
+            'recon': predicted_noise,      # Noise prediction (for MSE loss)
+            'x_0_pred': x_0_pred.transpose(1, 2), # Estimated trajectory (for metrics)
             'target_noise': noise,
             'cond': cond,
             't': t,
-            # Returning dummy recon for backward compatibility with metrics evaluation
-            # although meaningful metrics should be evaluated based on generated samples
-            'recon': x.transpose(1, 2), # Dummy original x 
             'mask': mask
         }
     

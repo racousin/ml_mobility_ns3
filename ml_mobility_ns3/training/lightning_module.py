@@ -23,6 +23,11 @@ class TrajectoryLightningModule(pl.LightningModule):
         
         # Initialize model
         self._init_model()
+
+        # Enable manual optimization for GAN training
+        if hasattr(self.model, 'discriminator'):
+            self.automatic_optimization = False
+            logger.info("Adversarial model detected: Switching to manual optimization.")
         
         # Load pretrained weights if specified
         self._load_pretrained_weights()
@@ -139,7 +144,7 @@ class TrajectoryLightningModule(pl.LightningModule):
         
         return x, mask, transport_mode, length
     
-    def _compute_loss(self, outputs: Dict, batch: Tuple) -> Tuple[torch.Tensor, Dict]:
+    def _compute_loss(self, outputs: Dict, batch: Tuple, mode: str = 'generator') -> Tuple[torch.Tensor, Dict]:
         """Compute loss using configured loss function."""
         x, mask, transport_mode, length = self._prepare_batch(batch)
         
@@ -153,15 +158,22 @@ class TrajectoryLightningModule(pl.LightningModule):
             'length': length
         }
         
-        # Compute loss
-        loss_dict = self.loss_fn(outputs, targets, mask)
+        # Compute loss (handle GAN mode if supported)
+        if hasattr(self.loss_fn, '__call__') and 'mode' in self.loss_fn.__call__.__code__.co_varnames:
+            loss_dict = self.loss_fn(outputs, targets, mask, mode=mode)
+        else:
+            loss_dict = self.loss_fn(outputs, targets, mask)
         
         return loss_dict['total'], loss_dict
     
     def _compute_metrics(self, outputs: Dict, batch: Tuple) -> Dict[str, torch.Tensor]:
         """Compute standardized metrics."""
         x, mask, _, _ = self._prepare_batch(batch)
-        return self.metrics.compute_comprehensive_metrics(outputs['recon'], x, mask)
+        
+        # For Diffusion models, we should evaluate on the predicted x0, not the noise prediction
+        recon = outputs.get('x_0_pred', outputs.get('recon'))
+        
+        return self.metrics.compute_comprehensive_metrics(recon, x, mask)
     
     def _log_metrics(self, loss: torch.Tensor, loss_components: Dict, 
                     metrics: Dict, prefix: str = 'train'):
@@ -183,30 +195,72 @@ class TrajectoryLightningModule(pl.LightningModule):
             self.log(f'{prefix}_beta', loss_components['beta'], prog_bar=False)
     
     def training_step(self, batch, batch_idx):
-        """Training step."""
+        """Training step with support for GAN adversarial training."""
         x, mask, transport_mode, length = self._prepare_batch(batch)
         
-        # Forward pass
-        outputs = self.forward(x, transport_mode, length, mask)
+        # Check if we are doing GAN training
+        is_gan = hasattr(self.model, 'discriminator')
         
-        # Compute loss
-        loss, loss_components = self._compute_loss(outputs, batch)
+        if is_gan:
+            opt_g, opt_d = self.optimizers()
+            
+            # --- 1. Discriminator Step ---
+            outputs = self.forward(x, transport_mode, length, mask)
+            
+            # Sample x_{t-1} from posterior: Real (from x_0) and Fake (from x_0_pred)
+            # x_t, x_0, x_0_pred are all [B, T, D]
+            # model.q_posterior_sample expects [B, T, D]
+            x_t_minus_1_real = self.model.q_posterior_sample(outputs['x_t'], outputs['x_0'], outputs['t'])
+            x_t_minus_1_fake = self.model.q_posterior_sample(outputs['x_t'], outputs['x_0_pred'], outputs['t'])
+
+            # Detach for discriminator step
+            d_x_t = outputs['x_t'].detach()
+            d_x_t_minus_1_real = x_t_minus_1_real.detach()
+            d_x_t_minus_1_fake = x_t_minus_1_fake.detach()
+            d_t = outputs['t'].detach()
+            d_cond = outputs['cond'].detach()
+
+            # Real: (x_t, x_{t-1}_real), Fake: (x_t, x_{t-1}_fake)
+            real_logits = self.model.discriminator(d_x_t, d_x_t_minus_1_real, d_t, d_cond)
+            fake_logits = self.model.discriminator(d_x_t, d_x_t_minus_1_fake, d_t, d_cond)
+            
+            loss_d_real = F.binary_cross_entropy_with_logits(real_logits, torch.ones_like(real_logits))
+            loss_d_fake = F.binary_cross_entropy_with_logits(fake_logits, torch.zeros_like(fake_logits))
+            loss_d = (loss_d_real + loss_d_fake) / 2
+            
+            opt_d.zero_grad()
+            self.manual_backward(loss_d)
+            self.clip_gradients(opt_d, gradient_clip_val=self.config.training.get('gradient_clip', 1.0), gradient_clip_algorithm="norm")
+            opt_d.step()
+            
+            # --- 2. Generator Step ---
+            # Generator wants x_{t-1}_fake to be classified as real
+            fake_logits_g = self.model.discriminator(outputs['x_t'], x_t_minus_1_fake, outputs['t'], outputs['cond'])
+            adv_loss_g = F.binary_cross_entropy_with_logits(fake_logits_g, torch.ones_like(fake_logits_g))
+            
+            # Standard noise MSE loss
+            mse_loss, loss_components = self._compute_loss(outputs, batch, mode='generator')
+            adv_weight = self.config.training.get('adv_weight', 0.1)
+            total_g_loss = mse_loss + adv_weight * adv_loss_g
+            
+            opt_g.zero_grad()
+            self.manual_backward(total_g_loss)
+            self.clip_gradients(opt_g, gradient_clip_val=self.config.training.get('gradient_clip', 1.0), gradient_clip_algorithm="norm")
+            opt_g.step()
+            
+            # Log metrics
+            self.log('train_loss_d', loss_d, prog_bar=True)
+            self.log('train_loss_g_adv', adv_loss_g, prog_bar=False)
+            self.log('train_loss_g_mse', mse_loss, prog_bar=True)
+            return total_g_loss
         
-        # Compute metrics
-        metrics = self._compute_metrics(outputs, batch)
-        
-        # Log everything
-        self._log_metrics(loss, loss_components, metrics, prefix='train')
-        
-        # Log adaptive scheduler status if available
-        if 'epochs_without_improvement' in loss_components:
-            self.log('train_epochs_without_improvement', 
-                    loss_components['epochs_without_improvement'], prog_bar=False)
-        if 'scheduler_converged' in loss_components:
-            self.log('train_scheduler_converged', 
-                    float(loss_components['scheduler_converged']), prog_bar=False)
-        
-        return loss
+        else:
+            # Standard single-optimizer training (VAE, GPT, Diffusion)
+            outputs = self.forward(x, transport_mode, length, mask)
+            loss, loss_components = self._compute_loss(outputs, batch)
+            metrics = self._compute_metrics(outputs, batch)
+            self._log_metrics(loss, loss_components, metrics, prefix='train')
+            return loss
     
     def validation_step(self, batch, batch_idx):
         """Validation step."""
@@ -331,12 +385,25 @@ class TrajectoryLightningModule(pl.LightningModule):
     
     def configure_optimizers(self):
         """Configure optimizer and scheduler."""
-        # Check if model has parameters
-        params = list(self.model.parameters())
-        if not params:
-            raise ValueError("Model has no parameters to optimize")
+        # Check if we are doing GAN training
+        is_gan = hasattr(self.model, 'discriminator')
         
-        # Create optimizer
+        if is_gan:
+            # Create optimizers for both Generator and Discriminator
+            opt_g = torch.optim.AdamW(
+                self.model.generator.parameters(),
+                lr=self.config.training.learning_rate,
+                weight_decay=self.config.training.get('weight_decay', 1e-5)
+            )
+            opt_d = torch.optim.AdamW(
+                self.model.discriminator.parameters(),
+                lr=self.config.training.learning_rate,
+                weight_decay=self.config.training.get('weight_decay', 1e-5)
+            )
+            return [opt_g, opt_d], []
+        
+        # Create standard optimizer
+        params = list(self.model.parameters())
         optimizer = torch.optim.AdamW(
             params,
             lr=self.config.training.learning_rate,
@@ -345,7 +412,6 @@ class TrajectoryLightningModule(pl.LightningModule):
         
         # Check if learning rate scheduling is enabled
         if self.config.training.get('lr_scheduler_enabled', True):
-            # Create scheduler
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer,
                 mode='min',

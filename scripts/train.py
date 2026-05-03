@@ -282,13 +282,19 @@ class TrainingPipeline:
             )
             
             # Create trainer
+            # Note: gradient_clip_val must be None if using manual optimization (GANs)
+            grad_clip = self.cfg.training.gradient_clip
+            if hasattr(self.model.model, 'discriminator'):
+                grad_clip = None
+                logger.info("Manual optimization detected: Disabling automatic gradient clipping in Trainer")
+
             trainer = pl.Trainer(
                 max_epochs=self.cfg.training.epochs,
                 accelerator=self.cfg.accelerator,
                 devices=self.cfg.devices,
                 callbacks=callbacks,
                 logger=tb_logger,
-                gradient_clip_val=self.cfg.training.gradient_clip,
+                gradient_clip_val=grad_clip,
                 log_every_n_steps=10,
                 val_check_interval=1.0,
                 enable_progress_bar=True,
@@ -296,8 +302,13 @@ class TrainingPipeline:
                 default_root_dir=exp_dir
             )
             
+            # Determine checkpoint to resume from
+            ckpt_path = self.cfg.training.get('resume_from_checkpoint', None)
+            if ckpt_path:
+                logger.info(f"Resuming training from checkpoint: {ckpt_path}")
+            
             # Train
-            trainer.fit(self.model, train_loader, val_loader)
+            trainer.fit(self.model, train_loader, val_loader, ckpt_path=ckpt_path)
             
             # Finalize
             self.finalize_experiment(
