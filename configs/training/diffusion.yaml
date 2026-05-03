@@ -1,0 +1,16 @@
+batch_size: 32
+epochs: 1500
+learning_rate: 0.001
+val_split: 0.1
+gradient_clip: 1.0
+early_stopping_patience: 50
+early_stopping_monitor: val_loss
+lr_scheduler_patience: 30
+lr_scheduler_factor: 0.5
+lr_scheduler_monitor: val_loss
+best_metric_monitor: val_loss
+pretrained_checkpoint: null
+# Loss configuration - diffusion uses noise prediction MSE
+loss:
+  type: diffusion
+  params: {}

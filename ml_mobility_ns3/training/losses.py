@@ -340,12 +340,36 @@ class SimpleVAELoss(BaseLoss):
 
 
 
+
+class DiffusionLoss(BaseLoss):
+    """Loss function for diffusion models (noise prediction MSE)."""
+    
+    def __init__(self, **kwargs):
+        super().__init__()
+    
+    def __call__(self, outputs: Dict[str, torch.Tensor], 
+                 targets: Dict[str, torch.Tensor], 
+                 mask: torch.Tensor) -> Dict[str, torch.Tensor]:
+        
+        predicted_noise = outputs['predicted_noise']
+        target_noise = outputs['target_noise']
+        
+        # Simple MSE loss between predicted and target noise
+        noise_loss = F.mse_loss(predicted_noise, target_noise)
+        
+        return {
+            'total': noise_loss,
+            'noise_loss': noise_loss,
+        }
+
+
 # Loss factory
 from ml_mobility_ns3.training.distance_aware_loss import DistanceVAELoss
 
 LOSS_REGISTRY = {
     'simple_vae': SimpleVAELoss,
     'distance_vae': DistanceVAELoss,
+    'diffusion': DiffusionLoss,
 }
 
 
