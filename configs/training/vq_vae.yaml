@@ -1,0 +1,18 @@
+batch_size: 128
+epochs: 1000
+learning_rate: 0.0005
+val_split: 0.1
+gradient_clip: 1.0
+early_stopping_enabled: true
+early_stopping_monitor: val_loss
+early_stopping_patience: 50
+lr_scheduler_enabled: true
+lr_scheduler_patience: 20
+lr_scheduler_factor: 0.5
+lr_scheduler_monitor: val_loss
+best_metric_monitor: val_loss
+
+loss:
+  type: vq_vae
+  params:
+    vq_weight: 1.0

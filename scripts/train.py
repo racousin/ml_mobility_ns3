@@ -139,10 +139,11 @@ class TrainingPipeline:
         callbacks = []
         
         # Model checkpoint
+        best_monitor = self.cfg.training.get('best_metric_monitor', 'val_loss')
         checkpoint_callback = ModelCheckpoint(
             dirpath=exp_dir / "checkpoints",
             filename='{epoch:02d}_{val_loss:.4f}',
-            monitor=self.cfg.training.best_metric_monitor ,
+            monitor=best_monitor,
             mode='min',
             save_top_k=1,
             save_last=True,
@@ -154,8 +155,8 @@ class TrainingPipeline:
         # Early stopping (optional - check if enabled)
         if self.cfg.training.get('early_stopping_enabled', True):
             early_stopping = EarlyStopping(
-                monitor=self.cfg.training.early_stopping_monitor,
-                patience=self.cfg.training.early_stopping_patience,
+                monitor=self.cfg.training.get('early_stopping_monitor', 'val_loss'),
+                patience=self.cfg.training.get('early_stopping_patience', 50),
                 mode='min',
                 verbose=True
             )
@@ -167,7 +168,7 @@ class TrainingPipeline:
         # Best metrics tracker
         metrics_tracker = BestMetricsTracker(
             exp_dir, 
-            monitor=self.cfg.training.best_metric_monitor 
+            monitor=best_monitor
         )
         callbacks.append(metrics_tracker)
         
@@ -299,7 +300,8 @@ class TrainingPipeline:
                 val_check_interval=1.0,
                 enable_progress_bar=True,
                 enable_model_summary=True,
-                default_root_dir=exp_dir
+                default_root_dir=exp_dir,
+                accumulate_grad_batches=self.cfg.training.get('accumulate_grad_batches', 1)
             )
             
             # Determine checkpoint to resume from

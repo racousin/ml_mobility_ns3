@@ -96,15 +96,16 @@ class ConditionalTrajectoryVAE(BaseTrajectoryModel):
         eps = torch.randn_like(std)
         return mu + eps * std
     
-    def decode(self, z: torch.Tensor, conditions: torch.Tensor) -> torch.Tensor:
+    def decode(self, z: torch.Tensor, conditions: torch.Tensor, target_length: int = None) -> torch.Tensor:
         batch_size = z.size(0)
+        seq_len = target_length or self.sequence_length
         
         # Concatenate latent with conditions
         z_conditioned = torch.cat([z, conditions], dim=-1)
         
         h = self.fc_latent(z_conditioned)
         h = torch.tanh(h)  # Add non-linearity
-        h = h.unsqueeze(1).repeat(1, self.sequence_length, 1)
+        h = h.unsqueeze(1).repeat(1, seq_len, 1)
         
         # Decode sequence
         out, _ = self.decoder_lstm(h)
@@ -118,10 +119,10 @@ class ConditionalTrajectoryVAE(BaseTrajectoryModel):
         conditions = self.get_conditions(transport_mode, length)
         mu, logvar = self.encode(x, conditions)
         z = self.reparameterize(mu, logvar)
-        recon = self.decode(z, conditions)
+        recon = self.decode(z, conditions, x.size(1))
         return {'recon': recon, 'mu': mu, 'logvar': logvar, 'z': z}
     
-    def generate(self, conditions: Dict[str, torch.Tensor], n_samples: int) -> torch.Tensor:
+    def generate(self, conditions: Dict[str, torch.Tensor], n_samples: int, target_length: int = None) -> torch.Tensor:
         transport_mode = conditions['transport_mode']
         length = conditions['length']
         
@@ -130,5 +131,5 @@ class ConditionalTrajectoryVAE(BaseTrajectoryModel):
         conditions_embed = self.get_conditions(transport_mode, length)
         
         with torch.no_grad():
-            trajectories = self.decode(z, conditions_embed)
+            trajectories = self.decode(z, conditions_embed, target_length)
         return trajectories

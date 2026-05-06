@@ -47,20 +47,22 @@ class VectorQuantizer(nn.Module):
         quantized = torch.matmul(encodings, self.embedding.weight).reshape(inputs.shape)
         
         # Compute losses
-        # Loss 1: Pull codebook towards encoder outputs (embedding loss)
-        e_latent_loss = F.mse_loss(quantized.detach(), inputs)
-        # Loss 2: Pull encoder outputs towards codebook (commitment loss)
-        q_latent_loss = F.mse_loss(quantized, inputs.detach())
+        # Embedding loss: Pull codebook towards encoder outputs
+        embedding_loss = F.mse_loss(quantized, inputs.detach())
+        # Commitment loss: Pull encoder outputs towards codebook
+        commitment_loss = F.mse_loss(quantized.detach(), inputs)
         
-        loss = q_latent_loss + self.commitment_cost * e_latent_loss
+        vq_loss = embedding_loss + self.commitment_cost * commitment_loss
         
         # Straight-through estimator for gradients
         # Use quantized during forward, but gradients flow through inputs
         quantized = inputs + (quantized - inputs).detach()
+        
+        # Calculate perplexity (monitoring metric for codebook usage)
         avg_probs = torch.mean(encodings, dim=0)
         perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
         
-        return quantized, loss, perplexity
+        return quantized, vq_loss, perplexity
 
 
 class ConditionalTrajectoryVQVAE(BaseTrajectoryModel):

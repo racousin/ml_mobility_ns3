@@ -39,16 +39,34 @@ class ConstantBetaScheduler(BaseBetaScheduler):
 
 class CyclicalBetaScheduler(BaseBetaScheduler):
     def __init__(self, start: float = 0.0, stop: float = 1.0, 
-                 n_steps: int = 10000, n_cycles: int = 4, ratio: float = 0.5):
-        self.start = start
-        self.stop = stop
-        self.period = n_steps // n_cycles
+                 n_steps: int = 10000, n_cycles: int = 4, ratio: float = 0.5,
+                 min_beta: Optional[float] = None, max_beta: Optional[float] = None,
+                 cycle_length: Optional[int] = None, mode: str = 'linear'):
+        # Map config names to internal names
+        self.start = min_beta if min_beta is not None else start
+        self.stop = max_beta if max_beta is not None else stop
+        self.mode = mode
+        
+        if cycle_length is not None:
+            # If cycle_length is provided, we assume it's in epochs
+            self.period = cycle_length
+            self.use_epochs = True
+        else:
+            self.period = n_steps // n_cycles
+            self.use_epochs = False
+            
         self.warmup = int(self.period * ratio)
 
     def get_beta(self, step: int, epoch: int) -> float:
-        step_in_cycle = step % self.period
+        t = epoch if self.use_epochs else step
+        step_in_cycle = t % self.period
+        
         if step_in_cycle < self.warmup:
-            return self.start + (self.stop - self.start) * step_in_cycle / self.warmup
+            progress = step_in_cycle / self.warmup
+            if self.mode == 'cosine':
+                progress = 0.5 * (1 - torch.cos(torch.tensor(progress * 3.14159)))
+            return self.start + (self.stop - self.start) * float(progress)
+        
         return self.stop
 
 class AdaptiveSlowAnnealingBeta(BaseBetaScheduler):
@@ -138,6 +156,31 @@ class SimpleVAELoss(BaseLoss):
         total_loss = recon_loss + beta * kl_loss
         
         return {'total': total_loss, 'recon_loss': recon_loss, 'kl_loss': kl_loss, 'beta': torch.tensor(beta)}
+        
+class VQVAELoss(BaseLoss):
+    """Loss for VQ-VAE including reconstruction and codebook losses."""
+    def __init__(self, vq_weight: float = 1.0, **kwargs):
+        super().__init__()
+        self.vq_weight = vq_weight
+
+    def __call__(self, outputs: Dict[str, torch.Tensor], 
+                 targets: Dict[str, torch.Tensor], 
+                 mask: torch.Tensor) -> Dict[str, torch.Tensor]:
+        recon = outputs['recon']
+        vq_loss = outputs['vq_loss']
+        
+        # Reconstruction loss (masked)
+        recon_loss = F.mse_loss(recon, targets['x'], reduction='none')
+        recon_loss = (recon_loss * mask.unsqueeze(-1)).sum() / mask.sum()
+        
+        total_loss = recon_loss + self.vq_weight * vq_loss
+        
+        return {
+            'total': total_loss, 
+            'recon_loss': recon_loss, 
+            'vq_loss': vq_loss,
+            'perplexity': outputs.get('perplexity', torch.tensor(0.0))
+        }
 
 class DiffusionLoss(BaseLoss):
     def __init__(self, **kwargs):
@@ -163,6 +206,7 @@ def create_loss(config: Dict[str, Any]) -> BaseLoss:
     LOSS_REGISTRY = {
         'simple_vae': SimpleVAELoss,
         'distance_vae': DistanceVAELoss,
+        'vq_vae': VQVAELoss,
         'diffusion': DiffusionLoss,
         'diffusion_gan': DiffusionGANLoss,
     }

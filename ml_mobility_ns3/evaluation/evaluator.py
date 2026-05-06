@@ -18,7 +18,7 @@ class TrajectoryEvaluator:
     def __init__(self, model, config):
         self.model = model
         self.config = config
-        self.device = config.device if config.device != 'cuda' else 'cpu'
+        self.device = config.get('device', 'cpu')
         self.model = self.model.to(self.device)
         self.stat_metrics = StatMetrics()
         

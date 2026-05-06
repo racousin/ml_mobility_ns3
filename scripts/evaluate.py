@@ -48,12 +48,16 @@ def main(cfg: DictConfig):
     
     logger.info(f"Using checkpoint: {checkpoint_path}")
     
+    # Determine device
+    device = cfg.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f"Using device: {device}")
+    
     # Load model
     model = load_checkpoint(
         checkpoint_path,
         cfg,
         TrajectoryLightningModule,
-        device='cpu'
+        device=device
     )
     
     # Load entire dataset
@@ -66,11 +70,12 @@ def main(cfg: DictConfig):
     logger.info(f"Dataset size: {len(dataset)} sequences")
     
     # Create dataloader for entire dataset
+    eval_batch_size = cfg.get('eval_batch_size', cfg.training.batch_size)
     dataloader = DataLoader(
         dataset, 
-        batch_size=cfg.training.batch_size,
+        batch_size=eval_batch_size,
         shuffle=False,
-        num_workers=9
+        num_workers=4
     )
     
     # Evaluate

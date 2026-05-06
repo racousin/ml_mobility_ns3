@@ -343,6 +343,19 @@ class TrajectoryLightningModule(pl.LightningModule):
             if values:
                 avg_metrics[key] = sum(values) / len(values)
         
+        # Aggregate loss components (recon, kl, vq, perplexity)
+        avg_loss_components = {}
+        if 'loss_components' in self._validation_outputs[0]:
+            comp_keys = self._validation_outputs[0]['loss_components'].keys()
+            for key in comp_keys:
+                if key != 'total':
+                    values = [out['loss_components'][key].item() for out in self._validation_outputs 
+                            if key in out['loss_components']]
+                    if values:
+                        avg_loss_components[key] = sum(values) / len(values)
+                        # Log epoch-level component
+                        self.log(f'val_epoch_{key}', avg_loss_components[key])
+        
         # Log epoch summary with better formatting
         if 'mse' in avg_metrics:
             self.log('val_epoch_mse', avg_metrics['mse'], prog_bar=True)
@@ -376,8 +389,12 @@ class TrajectoryLightningModule(pl.LightningModule):
                     logger.info(f"Point Dist MAE (km): {value:>10.3f}")
                 elif metric_name == 'total_distance_mae':
                     logger.info(f"Total Dist MAE (km): {value:>10.3f}")
-                elif metric_name == 'bird_distance_mae':
-                    logger.info(f"Bird Dist MAE (km):  {value:>10.3f}")
+            logger.info(f"Bird Dist MAE (km):  {avg_metrics.get('bird_distance_mae', 0):>10.3f}")
+            
+            if avg_loss_components:
+                logger.info("-" * 25)
+                for comp_name, value in avg_loss_components.items():
+                    logger.info(f"{comp_name:<20}: {value:>10.6f}")
             logger.info(f"{'='*50}\n")
         
         # Clear outputs for next epoch

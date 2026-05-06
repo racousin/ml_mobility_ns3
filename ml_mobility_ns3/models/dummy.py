@@ -89,7 +89,7 @@ class DummyModel(BaseTrajectoryModel):
             'z': z
         }
     
-    def generate(self, conditions: Dict[str, torch.Tensor], n_samples: int) -> torch.Tensor:
+    def generate(self, conditions: Dict[str, torch.Tensor], n_samples: int, target_length: int = None, **kwargs) -> torch.Tensor:
         """
         Generate trajectories from the latent space.
         """
@@ -105,10 +105,11 @@ class DummyModel(BaseTrajectoryModel):
             z = z + 0.1 * mode_embed
         
         # Decode to get trajectories
+        seq_len = target_length if target_length is not None else self.sequence_length
         with torch.no_grad():
             decoded_point = self.decoder(z)  # (n_samples, input_dim)
             trajectories = decoded_point.unsqueeze(1).expand(
-                n_samples, self.sequence_length, self.input_dim
+                n_samples, seq_len, self.input_dim
             )
             
             # Add some variation
