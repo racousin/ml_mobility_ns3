@@ -31,7 +31,7 @@ training:
   early_stopping_enabled: false
   lr_scheduler_enabled: false
   best_metric_monitor: val_loss
-  pretrained_checkpoint: experiments/vae_lstm_2025-09-06_19-32-02/checkpoints/last.ckpt
+  pretrained_checkpoint: null
   loss:
     type: simple_vae
     params:
